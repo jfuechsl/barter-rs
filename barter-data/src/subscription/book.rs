@@ -18,6 +18,9 @@ pub struct OrderBooksL1;
 
 impl SubscriptionKind for OrderBooksL1 {
     type Event = OrderBookL1;
+
+    const CHANNEL_FIELD: &'static str = "l1s";
+
     fn as_str(&self) -> &'static str {
         "l1"
     }
@@ -73,6 +76,9 @@ pub struct OrderBooksL2;
 
 impl SubscriptionKind for OrderBooksL2 {
     type Event = OrderBookEvent;
+
+    const CHANNEL_FIELD: &'static str = "l2s";
+
     fn as_str(&self) -> &'static str {
         "l2"
     }
@@ -96,6 +102,8 @@ pub struct OrderBooksL3;
 
 impl SubscriptionKind for OrderBooksL3 {
     type Event = OrderBookEvent;
+
+    const CHANNEL_FIELD: &'static str = "l3s";
 
     fn as_str(&self) -> &'static str {
         "l3"

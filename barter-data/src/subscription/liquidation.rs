@@ -13,6 +13,8 @@ pub struct Liquidations;
 impl SubscriptionKind for Liquidations {
     type Event = Liquidation;
 
+    const CHANNEL_FIELD: &'static str = "liquidations";
+
     fn as_str(&self) -> &'static str {
         "liquidations"
     }

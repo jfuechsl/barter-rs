@@ -147,7 +147,9 @@ impl StreamConnectorsInput {
             "PublicTrades",
             "OrderBooksL1",
             "OrderBooksL2",
+            "OrderBooksL3",
             "Liquidations",
+            "Candles",
         ];
 
         for entry in &self.entries {
@@ -288,6 +290,24 @@ impl ConnectorMetadata {
 }
 
 impl StreamConnectorsInput {
+    /// Maps SubKind variant identifier to its channel field name.
+    /// These must match SubscriptionKind::CHANNEL_FIELD constants.
+    /// Compiler verifies correctness via generated field access.
+    fn kind_to_channel_field(kind: &Ident) -> Result<&'static str> {
+        match kind.to_string().as_str() {
+            "PublicTrades" => Ok("trades"),
+            "OrderBooksL1" => Ok("l1s"),
+            "OrderBooksL2" => Ok("l2s"),
+            "OrderBooksL3" => Ok("l3s"),
+            "Liquidations" => Ok("liquidations"),
+            "Candles" => Ok("candles"),
+            _ => Err(Error::new(
+                kind.span(),
+                format!("Unknown subscription kind: {}", kind),
+            )),
+        }
+    }
+
     /// Generates the complete output token stream for the macro.
     ///
     /// This method transforms the parsed and validated input into Rust code that:
@@ -358,13 +378,8 @@ impl StreamConnectorsInput {
             let connector = &entry.connector;
 
             for kind in &entry.kinds {
-                let channel_field = match kind.to_string().as_str() {
-                    "PublicTrades" => format_ident!("trades"),
-                    "OrderBooksL1" => format_ident!("l1s"),
-                    "OrderBooksL2" => format_ident!("l2s"),
-                    "Liquidations" => format_ident!("liquidations"),
-                    _ => return Err(Error::new(kind.span(), "Unknown kind")),
-                };
+                let channel_field_name = Self::kind_to_channel_field(kind)?;
+                let channel_field = format_ident!("{}", channel_field_name);
 
                 // Match Arm
                 let match_arm = quote! {
@@ -485,9 +500,21 @@ impl StreamConnectorsInput {
                             .into_iter()
                             .map(|(exchange, rx)| (exchange, rx.into_stream()))
                             .collect(),
+                        l3s: channels
+                            .rxs
+                            .l3s
+                            .into_iter()
+                            .map(|(exchange, rx)| (exchange, rx.into_stream()))
+                            .collect(),
                         liquidations: channels
                             .rxs
                             .liquidations
+                            .into_iter()
+                            .map(|(exchange, rx)| (exchange, rx.into_stream()))
+                            .collect(),
+                        candles: channels
+                            .rxs
+                            .candles
                             .into_iter()
                             .map(|(exchange, rx)| (exchange, rx.into_stream()))
                             .collect(),

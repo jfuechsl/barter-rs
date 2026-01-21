@@ -275,7 +275,9 @@ use stream_registry::StreamConnectorsInput;
 /// | `PublicTrades` | `trades` |
 /// | `OrderBooksL1` | `l1s` |
 /// | `OrderBooksL2` | `l2s` |
+/// | `OrderBooksL3` | `l3s` |
 /// | `Liquidations` | `liquidations` |
+/// | `Candles` | `candles` |
 ///
 /// ## Adding a New Exchange
 ///

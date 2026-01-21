@@ -13,6 +13,8 @@ pub struct PublicTrades;
 impl SubscriptionKind for PublicTrades {
     type Event = PublicTrade;
 
+    const CHANNEL_FIELD: &'static str = "trades";
+
     fn as_str(&self) -> &'static str {
         "public_trades"
     }

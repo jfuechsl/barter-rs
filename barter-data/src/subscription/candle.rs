@@ -12,6 +12,8 @@ pub struct Candles;
 impl SubscriptionKind for Candles {
     type Event = Candle;
 
+    const CHANNEL_FIELD: &'static str = "candles";
+
     fn as_str(&self) -> &'static str {
         "candles"
     }

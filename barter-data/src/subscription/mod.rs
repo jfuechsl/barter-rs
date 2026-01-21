@@ -33,6 +33,10 @@ where
 {
     type Event: Debug;
     fn as_str(&self) -> &'static str;
+
+    /// Field name used in channel storage structs (Txs, Rxs, DynamicStreams).
+    /// Must match the field name exactly for compile-time verification.
+    const CHANNEL_FIELD: &'static str;
 }
 
 /// Barter [`Subscription`] used to subscribe to a [`SubscriptionKind`] for a particular exchange

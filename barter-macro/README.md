@@ -131,7 +131,9 @@ The following subscription kinds are supported:
 | `PublicTrades` | `trades`       | Real-time trade data              |
 | `OrderBooksL1` | `l1s`          | Level 1 order book (best bid/ask) |
 | `OrderBooksL2` | `l2s`          | Level 2 order book (depth)        |
+| `OrderBooksL3` | `l3s`          | Level 3 order book (full depth)   |
 | `Liquidations` | `liquidations` | Liquidation events                |
+| `Candles`      | `candles`      | OHLCV candle data                 |
 
 ## Naming Conventions
 
