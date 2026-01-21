@@ -28,6 +28,7 @@ use futures::{Stream, stream::SelectAll};
 use futures_util::{StreamExt, future::try_join_all};
 use itertools::Itertools;
 use std::{
+    collections::HashSet,
     fmt::{Debug, Display},
     sync::Arc,
 };
@@ -339,7 +340,12 @@ where
         let mut txs = Txs::default();
         let mut rxs = Rxs::default();
 
+        // Track expected (exchange, kind) pairs
+        let mut expected_pairs: HashSet<(ExchangeId, SubKind)> = HashSet::new();
+
         for sub in value.iter().flatten() {
+            expected_pairs.insert((sub.exchange, sub.kind));
+
             match sub.kind {
                 SubKind::PublicTrades => {
                     if let (None, None) =
@@ -375,6 +381,24 @@ where
                     }
                 }
                 unsupported => return Err(DataError::UnsupportedSubKind(unsupported)),
+            }
+        }
+
+        // Validate all expected channels were created
+        for (exchange, kind) in &expected_pairs {
+            let exists = match kind {
+                SubKind::PublicTrades => txs.trades.contains_key(exchange),
+                SubKind::OrderBooksL1 => txs.l1s.contains_key(exchange),
+                SubKind::OrderBooksL2 => txs.l2s.contains_key(exchange),
+                SubKind::Liquidations => txs.liquidations.contains_key(exchange),
+                _ => false,
+            };
+
+            if !exists {
+                return Err(DataError::ChannelNotFound {
+                    exchange: *exchange,
+                    sub_kind: *kind,
+                });
             }
         }
 
@@ -420,5 +444,112 @@ impl<InstrumentKey> Default for Rxs<InstrumentKey> {
             l2s: Default::default(),
             liquidations: Default::default(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use barter_instrument::instrument::market_data::{
+        MarketDataInstrument, kind::MarketDataInstrumentKind,
+    };
+
+    fn test_instrument() -> MarketDataInstrument {
+        MarketDataInstrument::new("btc", "usdt", MarketDataInstrumentKind::Spot)
+    }
+
+    #[test]
+    fn test_channels_validation_passes_for_created_channels() {
+        let subscriptions: Vec<Vec<Subscription<ExchangeId, MarketDataInstrument, SubKind>>> =
+            vec![vec![
+                Subscription::new(ExchangeId::BinanceSpot, test_instrument(), SubKind::PublicTrades),
+            ]];
+
+        let channels = Channels::<MarketDataInstrument>::try_from(&subscriptions);
+        assert!(
+            channels.is_ok(),
+            "Expected channel creation to succeed, got: {:?}",
+            channels.err()
+        );
+
+        let channels = channels.unwrap();
+        // The validation happened during try_from, so if we got Ok, channels exist
+        assert!(channels.txs.trades.contains_key(&ExchangeId::BinanceSpot));
+    }
+
+    #[test]
+    fn test_channels_validation_passes_for_multiple_exchanges() {
+        let subscriptions: Vec<Vec<Subscription<ExchangeId, MarketDataInstrument, SubKind>>> =
+            vec![vec![
+                Subscription::new(ExchangeId::BinanceSpot, test_instrument(), SubKind::PublicTrades),
+                Subscription::new(ExchangeId::Coinbase, test_instrument(), SubKind::PublicTrades),
+                Subscription::new(ExchangeId::BinanceSpot, test_instrument(), SubKind::OrderBooksL1),
+            ]];
+
+        let channels = Channels::<MarketDataInstrument>::try_from(&subscriptions);
+        assert!(
+            channels.is_ok(),
+            "Expected channel creation to succeed, got: {:?}",
+            channels.err()
+        );
+
+        let channels = channels.unwrap();
+        // Verify all expected channels exist
+        assert!(channels.txs.trades.contains_key(&ExchangeId::BinanceSpot));
+        assert!(channels.txs.trades.contains_key(&ExchangeId::Coinbase));
+        assert!(channels.txs.l1s.contains_key(&ExchangeId::BinanceSpot));
+    }
+
+    #[test]
+    fn test_channels_validation_deduplicates_subscriptions() {
+        // Same subscription repeated should only create one channel
+        let subscriptions: Vec<Vec<Subscription<ExchangeId, MarketDataInstrument, SubKind>>> =
+            vec![vec![
+                Subscription::new(ExchangeId::BinanceSpot, test_instrument(), SubKind::PublicTrades),
+                Subscription::new(ExchangeId::BinanceSpot, test_instrument(), SubKind::PublicTrades),
+            ]];
+
+        let channels = Channels::<MarketDataInstrument>::try_from(&subscriptions);
+        assert!(
+            channels.is_ok(),
+            "Expected channel creation to succeed, got: {:?}",
+            channels.err()
+        );
+
+        let channels = channels.unwrap();
+        // Only one channel should be created despite duplicate subscriptions
+        assert_eq!(channels.txs.trades.len(), 1);
+        assert!(channels.txs.trades.contains_key(&ExchangeId::BinanceSpot));
+    }
+
+    #[test]
+    fn test_channels_validation_with_all_sub_kinds() {
+        let subscriptions: Vec<Vec<Subscription<ExchangeId, MarketDataInstrument, SubKind>>> =
+            vec![vec![
+                Subscription::new(ExchangeId::BinanceSpot, test_instrument(), SubKind::PublicTrades),
+                Subscription::new(ExchangeId::BinanceSpot, test_instrument(), SubKind::OrderBooksL1),
+                Subscription::new(ExchangeId::BinanceSpot, test_instrument(), SubKind::OrderBooksL2),
+                Subscription::new(
+                    ExchangeId::BinanceFuturesUsd,
+                    test_instrument(),
+                    SubKind::Liquidations,
+                ),
+            ]];
+
+        let channels = Channels::<MarketDataInstrument>::try_from(&subscriptions);
+        assert!(
+            channels.is_ok(),
+            "Expected channel creation to succeed, got: {:?}",
+            channels.err()
+        );
+
+        let channels = channels.unwrap();
+        assert!(channels.txs.trades.contains_key(&ExchangeId::BinanceSpot));
+        assert!(channels.txs.l1s.contains_key(&ExchangeId::BinanceSpot));
+        assert!(channels.txs.l2s.contains_key(&ExchangeId::BinanceSpot));
+        assert!(channels
+            .txs
+            .liquidations
+            .contains_key(&ExchangeId::BinanceFuturesUsd));
     }
 }
