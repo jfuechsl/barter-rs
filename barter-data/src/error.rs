@@ -31,6 +31,12 @@ pub enum DataError {
         sub_kind: SubKind,
     },
 
+    #[error("channel not found for exchange: {exchange}, kind: {sub_kind}")]
+    ChannelNotFound {
+        exchange: ExchangeId,
+        sub_kind: SubKind,
+    },
+
     #[error(
         "\
         InvalidSequence: first_update_id {first_update_id} does not follow on from the \
@@ -91,5 +97,16 @@ mod tests {
             let actual = test.input.is_terminal();
             assert_eq!(actual, test.expected, "TC{} failed", index);
         }
+    }
+
+    #[test]
+    fn test_channel_not_found_display() {
+        let error = DataError::ChannelNotFound {
+            exchange: ExchangeId::BinanceSpot,
+            sub_kind: SubKind::PublicTrades,
+        };
+        let msg = error.to_string();
+        assert!(msg.contains("BinanceSpot"));
+        assert!(msg.contains("PublicTrades"));
     }
 }

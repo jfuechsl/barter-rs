@@ -126,7 +126,6 @@ pub struct DynamicStreams<InstrumentKey> {
 }
 
 impl<InstrumentKey> DynamicStreams<InstrumentKey> {
-
     /// Remove an exchange [`PublicTrade`] `Stream` from the [`DynamicStreams`] collection.
     ///
     /// Note that calling this method will permanently remove this `Stream` from [`Self`].

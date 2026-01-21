@@ -16,7 +16,7 @@ fn test_macro_compiles_with_valid_input() {
     // The macro generates an impl block, which requires the surrounding
     // context to exist. For unit testing, we just verify it parses.
     // Full integration testing happens when used in barter-data.
-    
+
     // This test passing means the proc-macro crate builds successfully
     // and can be invoked without panicking.
     assert!(true);
@@ -32,13 +32,13 @@ mod syntax_examples {
     const SINGLE: &str = r#"
         BinanceSpot => [PublicTrades],
     "#;
-    
+
     /// Single connector with multiple kinds.
     #[allow(dead_code)]
     const MULTIPLE_KINDS: &str = r#"
         BinanceSpot => [PublicTrades, OrderBooksL1, OrderBooksL2],
     "#;
-    
+
     /// Multiple connectors.
     #[allow(dead_code)]
     const MULTIPLE_CONNECTORS: &str = r#"
@@ -46,7 +46,7 @@ mod syntax_examples {
         BinanceFuturesUsd => [PublicTrades, Liquidations],
         Coinbase => [PublicTrades],
     "#;
-    
+
     /// Full registration matching current barter-data usage.
     #[allow(dead_code)]
     const FULL_REGISTRATION: &str = r#"
@@ -79,10 +79,15 @@ mod validation_tests {
     #[test]
     fn test_supported_subscription_kinds() {
         // Document the supported kinds for reference
-        let supported = ["PublicTrades", "OrderBooksL1", "OrderBooksL2", "Liquidations"];
+        let supported = [
+            "PublicTrades",
+            "OrderBooksL1",
+            "OrderBooksL2",
+            "Liquidations",
+        ];
         assert_eq!(supported.len(), 4);
     }
-    
+
     #[test]
     fn test_supported_connectors() {
         // Document all supported connectors
@@ -106,7 +111,7 @@ mod validation_tests {
         ];
         assert_eq!(connectors.len(), 16);
     }
-    
+
     #[test]
     fn test_kind_to_channel_mapping() {
         // Document the kind to channel field mapping
@@ -116,13 +121,13 @@ mod validation_tests {
             ("OrderBooksL2", "l2s"),
             ("Liquidations", "liquidations"),
         ];
-        
+
         for (kind, channel) in mappings {
             assert!(!kind.is_empty());
             assert!(!channel.is_empty());
         }
     }
-    
+
     #[test]
     fn test_connector_to_exchange_mapping() {
         // Document the connector to exchange root mapping
@@ -140,7 +145,7 @@ mod validation_tests {
             ("Okx", "okx"),
             ("Poloniex", "poloniex"),
         ];
-        
+
         for (connector, exchange) in mappings {
             assert!(!connector.is_empty());
             assert!(!exchange.is_empty());
@@ -162,7 +167,7 @@ mod error_documentation {
     /// ```
     #[allow(dead_code)]
     const DUPLICATE_ERROR: &str = "Duplicate registration for (BinanceSpot, PublicTrades)";
-    
+
     /// Unknown kind example (would fail to compile):
     /// ```compile_fail
     /// define_stream_connectors! {
@@ -170,9 +175,8 @@ mod error_documentation {
     /// }
     /// ```
     #[allow(dead_code)]
-    const UNKNOWN_KIND_ERROR: &str = 
-        "Unknown subscription kind: InvalidKind. Expected one of: [\"PublicTrades\", \"OrderBooksL1\", \"OrderBooksL2\", \"Liquidations\"]";
-    
+    const UNKNOWN_KIND_ERROR: &str = "Unknown subscription kind: InvalidKind. Expected one of: [\"PublicTrades\", \"OrderBooksL1\", \"OrderBooksL2\", \"Liquidations\"]";
+
     /// Unknown connector example (would fail to compile):
     /// ```compile_fail
     /// define_stream_connectors! {
@@ -181,7 +185,7 @@ mod error_documentation {
     /// ```
     #[allow(dead_code)]
     const UNKNOWN_CONNECTOR_ERROR: &str = "Unknown connector type: UnknownExchange";
-    
+
     /// Empty kinds example (would fail to compile):
     /// ```compile_fail
     /// define_stream_connectors! {

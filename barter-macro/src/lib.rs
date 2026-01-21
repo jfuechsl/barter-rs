@@ -285,4 +285,3 @@ pub fn define_stream_connectors(input: TokenStream) -> TokenStream {
         Err(err) => err.to_compile_error().into(),
     }
 }
-

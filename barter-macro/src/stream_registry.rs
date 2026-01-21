@@ -38,13 +38,13 @@
 //!    exchange root, sub-module (if any), and market type
 //! 2. The macro invocation site will then accept the new connector
 
-use std::collections::{HashSet, BTreeMap};
-use syn::parse::{Parse, ParseStream};
-use syn::{bracketed, Ident, Result, Token, Error};
-use syn::punctuated::Punctuated;
-use quote::{quote, format_ident};
-use proc_macro2::TokenStream;
 use convert_case::{Case, Casing};
+use proc_macro2::TokenStream;
+use quote::{format_ident, quote};
+use std::collections::{BTreeMap, HashSet};
+use syn::parse::{Parse, ParseStream};
+use syn::punctuated::Punctuated;
+use syn::{Error, Ident, Result, Token, bracketed};
 
 /// A single connector registration entry parsed from the macro input.
 ///
@@ -71,17 +71,15 @@ impl Parse for ConnectorEntry {
     fn parse(input: ParseStream) -> Result<Self> {
         let connector: Ident = input.parse()?;
         input.parse::<Token![=>]>()?;
-        
+
         let content;
         bracketed!(content in input);
-        
-        let kinds_punctuated: Punctuated<Ident, Token![,]> = content.parse_terminated(Parse::parse, Token![,])?;
+
+        let kinds_punctuated: Punctuated<Ident, Token![,]> =
+            content.parse_terminated(Parse::parse, Token![,])?;
         let kinds = kinds_punctuated.into_iter().collect();
-        
-        Ok(ConnectorEntry {
-            connector,
-            kinds,
-        })
+
+        Ok(ConnectorEntry { connector, kinds })
     }
 }
 
@@ -113,7 +111,8 @@ pub struct StreamConnectorsInput {
 
 impl Parse for StreamConnectorsInput {
     fn parse(input: ParseStream) -> Result<Self> {
-        let entries_punctuated: Punctuated<ConnectorEntry, Token![,]> = input.parse_terminated(ConnectorEntry::parse, Token![,])?;
+        let entries_punctuated: Punctuated<ConnectorEntry, Token![,]> =
+            input.parse_terminated(ConnectorEntry::parse, Token![,])?;
         let entries = entries_punctuated.into_iter().collect();
         Ok(StreamConnectorsInput { entries })
     }
@@ -144,25 +143,45 @@ impl StreamConnectorsInput {
         let mut errors = Vec::new();
         let mut seen_combinations = HashSet::new();
 
-        let valid_kinds = ["PublicTrades", "OrderBooksL1", "OrderBooksL2", "Liquidations"];
+        let valid_kinds = [
+            "PublicTrades",
+            "OrderBooksL1",
+            "OrderBooksL2",
+            "Liquidations",
+        ];
 
         for entry in &self.entries {
             if entry.kinds.is_empty() {
-                errors.push(Error::new(entry.connector.span(), "Connector must support at least one subscription kind"));
+                errors.push(Error::new(
+                    entry.connector.span(),
+                    "Connector must support at least one subscription kind",
+                ));
             }
 
             for kind in &entry.kinds {
                 let kind_str = kind.to_string();
-                
+
                 // Validate known kinds
                 if !valid_kinds.contains(&kind_str.as_str()) {
-                    errors.push(Error::new(kind.span(), format!("Unknown subscription kind: {}. Expected one of: {:?}", kind_str, valid_kinds)));
+                    errors.push(Error::new(
+                        kind.span(),
+                        format!(
+                            "Unknown subscription kind: {}. Expected one of: {:?}",
+                            kind_str, valid_kinds
+                        ),
+                    ));
                 }
 
                 // Validate duplicate combinations
                 let combination = (entry.connector.to_string(), kind_str);
                 if !seen_combinations.insert(combination.clone()) {
-                     errors.push(Error::new(kind.span(), format!("Duplicate registration for ({}, {})", combination.0, combination.1)));
+                    errors.push(Error::new(
+                        kind.span(),
+                        format!(
+                            "Duplicate registration for ({}, {})",
+                            combination.0, combination.1
+                        ),
+                    ));
                 }
             }
         }
@@ -170,11 +189,11 @@ impl StreamConnectorsInput {
         if errors.is_empty() {
             Ok(())
         } else {
-             let mut combined_error = errors[0].clone();
-             for err in errors.into_iter().skip(1) {
-                 combined_error.combine(err);
-             }
-             Err(combined_error)
+            let mut combined_error = errors[0].clone();
+            for err in errors.into_iter().skip(1) {
+                combined_error.combine(err);
+            }
+            Err(combined_error)
         }
     }
 }
@@ -294,7 +313,11 @@ impl StreamConnectorsInput {
     ///
     /// Returns an error if any connector metadata cannot be resolved (unknown connector type).
     pub fn generate(&self) -> Result<TokenStream> {
-        let mut imports_map: BTreeMap<String, (String, String, BTreeMap<Option<String>, Vec<Ident>>)> = BTreeMap::new();
+        #[allow(clippy::type_complexity)]
+        let mut imports_map: BTreeMap<
+            String,
+            (String, String, BTreeMap<Option<String>, Vec<Ident>>),
+        > = BTreeMap::new();
         let mut match_arms = TokenStream::new();
         let mut where_bounds = TokenStream::new();
 
@@ -302,13 +325,21 @@ impl StreamConnectorsInput {
             let meta = ConnectorMetadata::from_ident(&entry.connector)?;
 
             // Collect imports
-            let exchange_entry = imports_map.entry(meta.exchange_root.clone())
-                .or_insert_with(|| (meta.market.to_string(), meta.channel.to_string(), BTreeMap::new()));
-            
-            exchange_entry.2.entry(meta.sub_module.clone())
-                .or_insert_with(Vec::new)
-                .push(entry.connector.clone());
+            let exchange_entry = imports_map
+                .entry(meta.exchange_root.clone())
+                .or_insert_with(|| {
+                    (
+                        meta.market.to_string(),
+                        meta.channel.to_string(),
+                        BTreeMap::new(),
+                    )
+                });
 
+            exchange_entry
+                .2
+                .entry(meta.sub_module.clone())
+                .or_default()
+                .push(entry.connector.clone());
 
             let exchange_id = format_ident!("{}", entry.connector);
             let market = &meta.market;
@@ -330,7 +361,13 @@ impl StreamConnectorsInput {
                         init_and_forward::<_, _, #kind>(
                             #connector::default(),
                             subs,
-                            txs.#channel_field.get(&ExchangeId::#exchange_id).expect("channel must exist").clone(),
+                            txs.#channel_field
+                                .get(&ExchangeId::#exchange_id)
+                                .ok_or(DataError::ChannelNotFound {
+                                    exchange: ExchangeId::#exchange_id,
+                                    sub_kind: SubKind::#kind,
+                                })?
+                                .clone(),
                             #kind
                         ).await
                     }
@@ -348,29 +385,29 @@ impl StreamConnectorsInput {
         // Generate Imports
         let mut imports = TokenStream::new();
         for (root, (market_name, channel_name, sub_modules)) in imports_map {
-             let root_ident = format_ident!("{}", root);
-             let market_ident = format_ident!("{}", market_name);
-             let channel_ident = format_ident!("{}", channel_name);
-             
-             let mut sub_imports = TokenStream::new();
-             sub_imports.extend(quote! { market::#market_ident, channel::#channel_ident, });
+            let root_ident = format_ident!("{}", root);
+            let market_ident = format_ident!("{}", market_name);
+            let channel_ident = format_ident!("{}", channel_name);
 
-             for (sub_mod, connectors) in sub_modules {
-                 if let Some(sub) = sub_mod {
-                     let sub_ident = format_ident!("{}", sub);
-                     let connectors_iter = connectors.iter();
-                     sub_imports.extend(quote! { #sub_ident::{ #(#connectors_iter),* }, });
-                 } else {
-                     let connectors_iter = connectors.iter();
-                     sub_imports.extend(quote! { #(#connectors_iter),*, });
-                 }
-             }
+            let mut sub_imports = TokenStream::new();
+            sub_imports.extend(quote! { market::#market_ident, channel::#channel_ident, });
 
-             imports.extend(quote! {
-                 #root_ident::{ #sub_imports },
-             });
+            for (sub_mod, connectors) in sub_modules {
+                if let Some(sub) = sub_mod {
+                    let sub_ident = format_ident!("{}", sub);
+                    let connectors_iter = connectors.iter();
+                    sub_imports.extend(quote! { #sub_ident::{ #(#connectors_iter),* }, });
+                } else {
+                    let connectors_iter = connectors.iter();
+                    sub_imports.extend(quote! { #(#connectors_iter),*, });
+                }
+            }
+
+            imports.extend(quote! {
+                #root_ident::{ #sub_imports },
+            });
         }
-        
+
         Ok(quote! {
              use crate::exchange::{ #imports };
 
@@ -404,9 +441,9 @@ impl StreamConnectorsInput {
                                         async move {
                                             match (exchange, sub_kind) {
                                                 #match_arms
-                                                (exchange, sub_kind) => Err(DataError::Unsupported { 
-                                                    exchange, 
-                                                    sub_kind 
+                                                (exchange, sub_kind) => Err(DataError::Unsupported {
+                                                    exchange,
+                                                    sub_kind
                                                 }),
                                             }
                                         }
@@ -497,13 +534,12 @@ mod tests {
         };
         assert!(input.validate().is_err());
     }
-    
+
     #[test]
     fn test_validate_empty_kinds() {
-         let input: StreamConnectorsInput = parse_quote! {
-            BinanceSpot => []
-         };
-         assert!(input.validate().is_err());
+        let input: StreamConnectorsInput = parse_quote! {
+           BinanceSpot => []
+        };
+        assert!(input.validate().is_err());
     }
 }
-
