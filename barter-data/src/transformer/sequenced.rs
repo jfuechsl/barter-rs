@@ -16,17 +16,106 @@ use barter_integration::{
 use std::marker::PhantomData;
 use tokio::sync::mpsc;
 
-/// Trait defining the logic for sequencing OrderBook L2 updates.
+/// Trait defining the logic for sequencing and validating OrderBook L2 updates.
+///
+/// Many cryptocurrency exchanges stream order book updates as incremental deltas. To maintain
+/// an accurate local order book, these updates must be processed in the correct sequence.
+/// Different exchanges have different sequencing rules (e.g., Binance Spot vs Binance Futures
+/// have subtly different validation logic).
+///
+/// # Why Sequencing is Needed
+///
+/// Order book delta streams may:
+/// - Arrive out of order due to network latency
+/// - Contain stale updates that should be dropped
+/// - Have gaps indicating missed messages (requiring re-initialization)
+///
+/// # Contract
+///
+/// Implementors must:
+/// - Store sequence metadata (e.g., `last_update_id`) to validate incoming updates
+/// - Return `Ok(Some(update))` for valid updates that should be applied
+/// - Return `Ok(None)` for stale/duplicate updates that should be silently dropped
+/// - Return `Err(DataError::InvalidSequence { .. })` when a sequence gap is detected
+///
+/// # Example Implementations
+///
+/// See the following exchange-specific implementations:
+/// - [`BinanceSpotOrderBookL2Sequencer`](crate::exchange::binance::spot::l2::BinanceSpotOrderBookL2Sequencer)
+/// - [`BinanceFuturesUsdOrderBookL2Sequencer`](crate::exchange::binance::futures::l2::BinanceFuturesUsdOrderBookL2Sequencer)
+/// - [`BybitOrderBookL2Sequencer`](crate::exchange::bybit::book::l2::BybitOrderBookL2Sequencer)
 pub trait OrderBookL2Sequencer: Send + Sized {
+    /// The exchange-specific update type containing order book delta information.
+    ///
+    /// Must implement [`Identifier<Option<SubscriptionId>>`] to enable routing updates
+    /// to the correct instrument's sequencer.
     type Update: Identifier<Option<SubscriptionId>>;
 
-    /// Construct a new [`OrderBookL2Sequencer`] from an optional initial [`OrderBookEvent`] snapshot.
+    /// Construct a new [`OrderBookL2Sequencer`] from an optional initial snapshot.
+    ///
+    /// # Arguments
+    ///
+    /// * `snapshot` - An optional initial order book snapshot. When `Some`, the sequencer
+    ///   extracts sequence metadata from the snapshot. When `None`, the implementation
+    ///   decides how to handle (some exchanges start from first WebSocket snapshot).
+    ///
+    /// * `sub_id` - The subscription identifier, used for error reporting.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Self)` - A properly initialized sequencer
+    /// * `Err(DataError::InitialSnapshotMissing(sub_id))` - When snapshot is required but not provided
+    /// * `Err(DataError::InitialSnapshotInvalid(_))` - When snapshot is wrong variant
+    ///
+    /// # Contract for `snapshot: None`
+    ///
+    /// When `snapshot` is `None`, the implementation should either:
+    /// 1. Return an error if an initial snapshot is required (e.g., Binance)
+    /// 2. Initialize in a "waiting for snapshot" state (e.g., Bybit)
     fn new(snapshot: Option<&OrderBookEvent>, sub_id: SubscriptionId) -> Result<Self, DataError>;
 
-    /// Validate the sequence of the update.
+    /// Validate the sequence of an incoming update.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Some(update))` - Valid and in-sequence; apply to order book
+    /// * `Ok(None)` - Stale or duplicate; silently drop
+    /// * `Err(DataError::InvalidSequence { .. })` - Sequence gap detected; re-initialize
+    ///
+    /// # What `Ok(None)` Means
+    ///
+    /// Returning `Ok(None)` indicates the update should not be applied. Common reasons:
+    /// - Update's sequence number <= last processed (stale)
+    /// - Update arrived before initial snapshot (for Bybit-style exchanges)
     fn validate(&mut self, update: Self::Update) -> Result<Option<Self::Update>, DataError>;
 }
 
+/// A generic [`ExchangeTransformer`] for OrderBook L2 streams requiring sequence validation.
+///
+/// This transformer wraps an [`OrderBookL2Sequencer`] implementation to validate the sequence
+/// of incoming updates before transforming them into normalized [`MarketEvent`]s.
+///
+/// # Overview
+///
+/// 1. Routes incoming updates to the correct instrument's sequencer using subscription ID
+/// 2. Validates sequence using [`OrderBookL2Sequencer::validate`]
+/// 3. Transforms valid updates into normalized [`MarketEvent<InstrumentKey, OrderBookEvent>`]
+/// 4. Drops stale/duplicate updates (when `validate` returns `Ok(None)`)
+///
+/// # Type Parameters
+///
+/// * `Exchange` - The exchange type implementing [`Connector`]
+/// * `InstrumentKey` - The instrument identifier type in output events
+/// * `Sequencer` - The [`OrderBookL2Sequencer`] implementation
+///
+/// # Usage
+///
+/// Typically used via a type alias:
+///
+/// ```ignore
+/// pub type BinanceSpotOrderBooksL2Transformer<InstrumentKey> =
+///     SequencedOrderBookL2Transformer<BinanceSpot, InstrumentKey, BinanceSpotOrderBookL2Sequencer>;
+/// ```
 #[derive(Debug)]
 pub struct SequencedOrderBookL2Transformer<Exchange, InstrumentKey, Sequencer> {
     exchange_id: ExchangeId,
@@ -34,9 +123,20 @@ pub struct SequencedOrderBookL2Transformer<Exchange, InstrumentKey, Sequencer> {
     phantom: PhantomData<Exchange>,
 }
 
+/// Associates an instrument key with its [`OrderBookL2Sequencer`] instance.
+///
+/// Each instrument in an [`OrderBooksL2`] stream has its own independent sequencer,
+/// since sequence numbers are per-instrument.
+///
+/// # Fields
+///
+/// * `key` - The instrument identifier cloned into each output [`MarketEvent`]
+/// * `sequencer` - The stateful sequencer tracking sequence numbers
 #[derive(Debug)]
 pub struct SequencedInstrument<InstrumentKey, Sequencer> {
+    /// The instrument identifier for output events.
     pub key: InstrumentKey,
+    /// The sequencer validating update sequences.
     pub sequencer: Sequencer,
 }
 
@@ -168,7 +268,10 @@ mod tests {
     impl OrderBookL2Sequencer for MockSequencer {
         type Update = MockUpdate;
 
-        fn new(snapshot: Option<&OrderBookEvent>, sub_id: SubscriptionId) -> Result<Self, DataError> {
+        fn new(
+            snapshot: Option<&OrderBookEvent>,
+            sub_id: SubscriptionId,
+        ) -> Result<Self, DataError> {
             // Reject if snapshot is an Update instead of Snapshot
             if let Some(OrderBookEvent::Update(_)) = snapshot {
                 return Err(DataError::InitialSnapshotInvalid(
@@ -263,8 +366,7 @@ mod tests {
 
         #[test]
         fn test_sequencer_validate_returns_valid_update() {
-            let mut sequencer =
-                MockSequencer::new(None, SubscriptionId::from("test")).unwrap();
+            let mut sequencer = MockSequencer::new(None, SubscriptionId::from("test")).unwrap();
 
             let update = MockUpdate {
                 id: 1,
@@ -333,8 +435,7 @@ mod tests {
 
         #[test]
         fn test_sequencer_validate_sequential_updates() {
-            let mut sequencer =
-                MockSequencer::new(None, SubscriptionId::from("test")).unwrap();
+            let mut sequencer = MockSequencer::new(None, SubscriptionId::from("test")).unwrap();
 
             for id in 1..=5 {
                 let update = MockUpdate {

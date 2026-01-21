@@ -162,6 +162,11 @@ pub mod books;
 /// [`futures_usd`](exchange::binance::futures::l2::BinanceFuturesUsdOrderBooksL2Transformer).
 pub mod transformer;
 
+// Re-export key transformer types for discoverability
+pub use transformer::sequenced::{
+    OrderBookL2Sequencer, SequencedInstrument, SequencedOrderBookL2Transformer,
+};
+
 /// Convenient type alias for an [`ExchangeStream`] utilizing a tungstenite
 /// [`WebSocket`](barter_integration::protocol::websocket::WebSocket).
 pub type ExchangeWsStream<Parser, Transformer> = ExchangeStream<Parser, WsStream, Transformer>;

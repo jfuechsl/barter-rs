@@ -55,7 +55,27 @@ define_stream_connectors! {
     Okx => [PublicTrades],
 }
 
-/// Generic helper to initialise a `MarketStream` and forward it to a channel.
+/// Initialize a [`MarketStream`] and spawn a task to forward events to a channel.
+///
+/// Combines [`init_boxed_stream`] and [`spawn_forward`] into a single operation.
+///
+/// # Type Parameters
+///
+/// * `Exchange` - The exchange connector type
+/// * `Instrument` - The instrument data type
+/// * `Kind` - The subscription kind
+///
+/// # Arguments
+///
+/// * `exchange` - The exchange instance
+/// * `subscriptions` - Subscriptions to initialize
+/// * `sender` - Channel sender for market events
+/// * `kind` - The subscription kind marker
+///
+/// # Returns
+///
+/// * `Ok(JoinHandle<()>)` - Handle to the forwarding task
+/// * `Err(DataError)` - If initialization fails
 async fn init_and_forward<Exchange, Instrument, Kind>(
     exchange: Exchange,
     subscriptions: Vec<Subscription<ExchangeId, Instrument, SubKind>>,
@@ -75,6 +95,16 @@ where
     Ok(spawn_forward(stream, sender))
 }
 
+/// Initialize a [`MarketStream`] as a boxed, type-erased stream.
+///
+/// Creates a reconnecting market stream and returns it as [`BoxedMarketStream`]
+/// for composition with other streams.
+///
+/// # Arguments
+///
+/// * `exchange` - The exchange instance
+/// * `subscriptions` - Subscriptions (using `SubKind`) converted to specific `Kind`
+/// * `kind` - The subscription kind marker
 async fn init_boxed_stream<Exchange, Instrument, Kind>(
     exchange: Exchange,
     subscriptions: Vec<Subscription<ExchangeId, Instrument, SubKind>>,
@@ -100,6 +130,18 @@ where
     .map(|stream| stream.boxed())
 }
 
+/// Spawn a task that forwards events from a stream to a channel.
+///
+/// Runs until the stream is exhausted or receiver is dropped.
+///
+/// # Arguments
+///
+/// * `stream` - The market stream to read from
+/// * `sender` - The channel sender to forward to
+///
+/// # Returns
+///
+/// [`JoinHandle`] for the spawned task.
 fn spawn_forward<InstrumentKey, Event>(
     stream: BoxedMarketStream<InstrumentKey, Event>,
     sender: UnboundedTx<MarketStreamResult<InstrumentKey, Event>>,
