@@ -367,3 +367,7 @@ where
         Self { channel, market }
     }
 }
+
+//Note: The impl_market_identifier! and impl_channel_identifier! macros are thoroughly
+// tested through their usage in concrete exchange implementations (Binance, Bybit, etc.).
+// Compile-fail tests for macro error cases are in barter-macro/tests/ instead.

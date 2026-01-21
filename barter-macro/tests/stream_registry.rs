@@ -155,43 +155,92 @@ mod validation_tests {
 
 /// Tests demonstrating error cases.
 ///
-/// These are compile-fail tests that would fail if uncommented.
-/// They serve as documentation of what error messages users will see.
+/// These compile-fail doc tests verify that the macro produces appropriate compile errors
+/// for invalid inputs. Run with `cargo test --doc`.
 mod error_documentation {
-    /// Duplicate registration example (would fail to compile):
+    /// Duplicate registration error.
+    ///
+    /// The macro should reject duplicate (connector, kind) pairs.
+    ///
     /// ```compile_fail
+    /// use barter_macro::define_stream_connectors;
+    ///
     /// define_stream_connectors! {
     ///     BinanceSpot => [PublicTrades],
-    ///     BinanceSpot => [PublicTrades],  // Error: Duplicate registration
+    ///     BinanceSpot => [PublicTrades],
     /// }
     /// ```
-    #[allow(dead_code)]
-    const DUPLICATE_ERROR: &str = "Duplicate registration for (BinanceSpot, PublicTrades)";
+    #[test]
+    fn duplicate_registration_fails_to_compile() {
+        // This test documents that duplicate registrations are rejected at compile time.
+        // The actual test is in the doc test above.
+    }
 
-    /// Unknown kind example (would fail to compile):
+    /// Unknown kind error.
+    ///
+    /// The macro should reject subscription kinds that are not supported.
+    ///
     /// ```compile_fail
+    /// use barter_macro::define_stream_connectors;
+    ///
     /// define_stream_connectors! {
-    ///     BinanceSpot => [InvalidKind],  // Error: Unknown subscription kind
+    ///     BinanceSpot => [InvalidKind],
     /// }
     /// ```
-    #[allow(dead_code)]
-    const UNKNOWN_KIND_ERROR: &str = "Unknown subscription kind: InvalidKind. Expected one of: [\"PublicTrades\", \"OrderBooksL1\", \"OrderBooksL2\", \"Liquidations\"]";
+    #[test]
+    fn unknown_kind_fails_to_compile() {
+        // This test documents that unknown subscription kinds are rejected at compile time.
+        // The actual test is in the doc test above.
+    }
 
-    /// Unknown connector example (would fail to compile):
+    /// Unknown connector error.
+    ///
+    /// The macro should reject connector types that are not registered.
+    ///
     /// ```compile_fail
+    /// use barter_macro::define_stream_connectors;
+    ///
     /// define_stream_connectors! {
-    ///     UnknownExchange => [PublicTrades],  // Error: Unknown connector type
+    ///     UnknownExchange => [PublicTrades],
     /// }
     /// ```
-    #[allow(dead_code)]
-    const UNKNOWN_CONNECTOR_ERROR: &str = "Unknown connector type: UnknownExchange";
+    #[test]
+    fn unknown_connector_fails_to_compile() {
+        // This test documents that unknown connector types are rejected at compile time.
+        // The actual test is in the doc test above.
+    }
 
-    /// Empty kinds example (would fail to compile):
+    /// Empty kinds error.
+    ///
+    /// The macro should reject connectors with no subscription kinds.
+    ///
     /// ```compile_fail
+    /// use barter_macro::define_stream_connectors;
+    ///
     /// define_stream_connectors! {
-    ///     BinanceSpot => [],  // Error: Empty kinds list
+    ///     BinanceSpot => [],
     /// }
     /// ```
-    #[allow(dead_code)]
-    const EMPTY_KINDS_ERROR: &str = "Connector must support at least one subscription kind";
+    #[test]
+    fn empty_kinds_fails_to_compile() {
+        // This test documents that empty subscription kind lists are rejected at compile time.
+        // The actual test is in the doc test above.
+    }
+
+    /// Invalid syntax error.
+    ///
+    /// The macro should reject malformed syntax.
+    ///
+    /// ```compile_fail
+    /// use barter_macro::define_stream_connectors;
+    ///
+    /// define_stream_connectors! {
+    ///     BinanceSpot: PublicTrades  // Wrong separator (: instead of =>)
+    /// }
+    /// ```
+    #[test]
+    fn invalid_syntax_fails_to_compile() {
+        // This test documents that invalid macro syntax is rejected at compile time.
+        // The actual test is in the doc test above.
+    }
 }

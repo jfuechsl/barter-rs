@@ -136,3 +136,221 @@ where
         .0
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        books::{Level, OrderBook},
+        subscription::book::OrderBookEvent,
+    };
+    use barter_integration::subscription::SubscriptionId;
+
+    // Mock sequencer for testing trait contract
+    #[derive(Debug)]
+    struct MockSequencer {
+        last_id: Option<u64>,
+        sub_id: SubscriptionId,
+    }
+
+    #[derive(Debug, Clone, PartialEq)]
+    struct MockUpdate {
+        id: u64,
+        subscription_id: SubscriptionId,
+    }
+
+    impl Identifier<Option<SubscriptionId>> for MockUpdate {
+        fn id(&self) -> Option<SubscriptionId> {
+            Some(self.subscription_id.clone())
+        }
+    }
+
+    impl OrderBookL2Sequencer for MockSequencer {
+        type Update = MockUpdate;
+
+        fn new(snapshot: Option<&OrderBookEvent>, sub_id: SubscriptionId) -> Result<Self, DataError> {
+            // Reject if snapshot is an Update instead of Snapshot
+            if let Some(OrderBookEvent::Update(_)) = snapshot {
+                return Err(DataError::InitialSnapshotInvalid(
+                    "expected Snapshot, got Update".to_string(),
+                ));
+            }
+
+            let last_id = snapshot.and_then(|event| match event {
+                OrderBookEvent::Snapshot(book) => Some(book.sequence()),
+                _ => None,
+            });
+
+            Ok(Self { last_id, sub_id })
+        }
+
+        fn validate(&mut self, update: Self::Update) -> Result<Option<Self::Update>, DataError> {
+            match self.last_id {
+                None => {
+                    // First update - accept and set
+                    self.last_id = Some(update.id);
+                    Ok(Some(update))
+                }
+                Some(last_id) => {
+                    if update.id == last_id + 1 {
+                        self.last_id = Some(update.id);
+                        Ok(Some(update))
+                    } else if update.id <= last_id {
+                        // Stale update
+                        Ok(None)
+                    } else {
+                        // Gap in sequence
+                        Err(DataError::InvalidSequence {
+                            prev_last_update_id: last_id,
+                            first_update_id: update.id,
+                        })
+                    }
+                }
+            }
+        }
+    }
+
+    // Tests for OrderBookL2Sequencer trait
+    mod sequencer_trait_tests {
+        use super::*;
+
+        #[test]
+        fn test_sequencer_new_with_valid_snapshot() {
+            let snapshot = OrderBookEvent::Snapshot(OrderBook::new(
+                100,
+                None,
+                Vec::<Level>::new(),
+                Vec::<Level>::new(),
+            ));
+            let sub_id = SubscriptionId::from("test");
+
+            let sequencer = MockSequencer::new(Some(&snapshot), sub_id.clone());
+            assert!(sequencer.is_ok());
+
+            let sequencer = sequencer.unwrap();
+            assert_eq!(sequencer.last_id, Some(100));
+            assert_eq!(sequencer.sub_id, sub_id);
+        }
+
+        #[test]
+        fn test_sequencer_new_with_update_instead_of_snapshot_errors() {
+            let update = OrderBookEvent::Update(OrderBook::new(
+                100,
+                None,
+                Vec::<Level>::new(),
+                Vec::<Level>::new(),
+            ));
+            let sub_id = SubscriptionId::from("test");
+
+            let result = MockSequencer::new(Some(&update), sub_id);
+            assert!(result.is_err());
+
+            match result {
+                Err(DataError::InitialSnapshotInvalid(_)) => {}
+                _ => panic!("Expected InitialSnapshotInvalid error"),
+            }
+        }
+
+        #[test]
+        fn test_sequencer_new_without_snapshot() {
+            let sub_id = SubscriptionId::from("test");
+            let sequencer = MockSequencer::new(None, sub_id.clone());
+
+            assert!(sequencer.is_ok());
+            let sequencer = sequencer.unwrap();
+            assert_eq!(sequencer.last_id, None);
+        }
+
+        #[test]
+        fn test_sequencer_validate_returns_valid_update() {
+            let mut sequencer =
+                MockSequencer::new(None, SubscriptionId::from("test")).unwrap();
+
+            let update = MockUpdate {
+                id: 1,
+                subscription_id: SubscriptionId::from("test"),
+            };
+
+            let result = sequencer.validate(update.clone());
+            assert!(result.is_ok());
+            assert_eq!(result.unwrap(), Some(update));
+            assert_eq!(sequencer.last_id, Some(1));
+        }
+
+        #[test]
+        fn test_sequencer_validate_returns_none_for_stale() {
+            let snapshot = OrderBookEvent::Snapshot(OrderBook::new(
+                100,
+                None,
+                Vec::<Level>::new(),
+                Vec::<Level>::new(),
+            ));
+            let mut sequencer =
+                MockSequencer::new(Some(&snapshot), SubscriptionId::from("test")).unwrap();
+
+            // Try to validate stale update (id <= last_id)
+            let stale_update = MockUpdate {
+                id: 100,
+                subscription_id: SubscriptionId::from("test"),
+            };
+
+            let result = sequencer.validate(stale_update);
+            assert!(result.is_ok());
+            assert_eq!(result.unwrap(), None);
+        }
+
+        #[test]
+        fn test_sequencer_validate_returns_error_for_gap() {
+            let snapshot = OrderBookEvent::Snapshot(OrderBook::new(
+                100,
+                None,
+                Vec::<Level>::new(),
+                Vec::<Level>::new(),
+            ));
+            let mut sequencer =
+                MockSequencer::new(Some(&snapshot), SubscriptionId::from("test")).unwrap();
+
+            // Try to validate update with gap
+            let update_with_gap = MockUpdate {
+                id: 105,
+                subscription_id: SubscriptionId::from("test"),
+            };
+
+            let result = sequencer.validate(update_with_gap);
+            assert!(result.is_err());
+
+            match result {
+                Err(DataError::InvalidSequence {
+                    prev_last_update_id,
+                    first_update_id,
+                }) => {
+                    assert_eq!(prev_last_update_id, 100);
+                    assert_eq!(first_update_id, 105);
+                }
+                _ => panic!("Expected InvalidSequence error"),
+            }
+        }
+
+        #[test]
+        fn test_sequencer_validate_sequential_updates() {
+            let mut sequencer =
+                MockSequencer::new(None, SubscriptionId::from("test")).unwrap();
+
+            for id in 1..=5 {
+                let update = MockUpdate {
+                    id,
+                    subscription_id: SubscriptionId::from("test"),
+                };
+
+                let result = sequencer.validate(update.clone());
+                assert!(result.is_ok());
+                assert_eq!(result.unwrap(), Some(update));
+                assert_eq!(sequencer.last_id, Some(id));
+            }
+        }
+    }
+
+    // Note: SequencedOrderBookL2Transformer integration testing is done through
+    // concrete implementations like BinanceSpotOrderBookL2Sequencer and
+    // BybitOrderBookL2Sequencer. The trait contract is tested above via MockSequencer.
+}
