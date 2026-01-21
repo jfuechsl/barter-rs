@@ -8,6 +8,7 @@ use crate::{
     transformer::stateless::StatelessTransformer,
 };
 use barter_instrument::exchange::ExchangeId;
+use barter_macro::StreamConnectorMeta;
 use std::fmt::Display;
 
 /// Public trades types.
@@ -22,7 +23,8 @@ pub const WEBSOCKET_BASE_URL_GATEIO_PERPETUALS_USD: &str = "wss://fx-ws.gateio.w
 pub type GateioPerpetualsUsd = Gateio<GateioServerPerpetualsUsd>;
 
 /// [`Gateio`] perpetual usd [`ExchangeServer`].
-#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Default)]
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Default, StreamConnectorMeta)]
+#[connector(exchange = "gateio", sub_module = "perpetual")]
 pub struct GateioServerPerpetualsUsd;
 
 impl ExchangeServer for GateioServerPerpetualsUsd {
@@ -58,7 +60,8 @@ pub const WEBSOCKET_BASE_URL_GATEIO_PERPETUALS_BTC: &str = "wss://fx-ws.gateio.w
 pub type GateioPerpetualsBtc = Gateio<GateioServerPerpetualsBtc>;
 
 /// [`Gateio`] perpetual btc [`ExchangeServer`].
-#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Default)]
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Default, StreamConnectorMeta)]
+#[connector(exchange = "gateio", sub_module = "perpetual")]
 pub struct GateioServerPerpetualsBtc;
 
 impl ExchangeServer for GateioServerPerpetualsBtc {

@@ -40,6 +40,9 @@ pub mod okx;
 /// exchange [`Connector`] to build [`WsMessage`] subscription payloads.
 pub mod subscription;
 
+/// Trait for connector metadata used by the `define_stream_connectors!` macro.
+pub mod connector_meta;
+
 /// Default [`Duration`] the [`Connector::SubValidator`] will wait to receive all success responses to actioned
 /// `Subscription` requests.
 pub const DEFAULT_SUBSCRIPTION_TIMEOUT: Duration = Duration::from_secs(10);

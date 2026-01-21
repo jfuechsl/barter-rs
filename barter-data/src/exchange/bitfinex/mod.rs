@@ -36,7 +36,7 @@ use barter_integration::{
     error::SocketError,
     protocol::websocket::{WebSocketSerdeParser, WsMessage},
 };
-use barter_macro::{DeExchange, SerExchange};
+use barter_macro::{DeExchange, SerExchange, StreamConnectorMeta};
 use derive_more::Display;
 use serde_json::json;
 use url::Url;
@@ -86,7 +86,9 @@ pub type BitfinexWsStream<Transformer> = ExchangeWsStream<WebSocketSerdeParser, 
     Display,
     DeExchange,
     SerExchange,
+    StreamConnectorMeta,
 )]
+#[connector(exchange = "bitfinex")]
 pub struct Bitfinex;
 
 impl Connector for Bitfinex {

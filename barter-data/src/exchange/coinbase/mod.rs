@@ -15,7 +15,7 @@ use barter_integration::{
     error::SocketError,
     protocol::websocket::{WebSocketSerdeParser, WsMessage},
 };
-use barter_macro::{DeExchange, SerExchange};
+use barter_macro::{DeExchange, SerExchange, StreamConnectorMeta};
 use derive_more::Display;
 use serde_json::json;
 use url::Url;
@@ -59,7 +59,9 @@ pub type CoinbaseWsStream<Transformer> = ExchangeWsStream<WebSocketSerdeParser, 
     Display,
     DeExchange,
     SerExchange,
+    StreamConnectorMeta,
 )]
+#[connector(exchange = "coinbase")]
 pub struct Coinbase;
 
 impl Connector for Coinbase {

@@ -17,6 +17,7 @@ use crate::{
     transformer::stateless::StatelessTransformer,
 };
 use barter_instrument::exchange::ExchangeId;
+use barter_macro::StreamConnectorMeta;
 use std::fmt::{Display, Formatter};
 
 /// Level 2 OrderBook types.
@@ -34,7 +35,8 @@ pub const WEBSOCKET_BASE_URL_BINANCE_FUTURES_USD: &str = "wss://fstream.binance.
 pub type BinanceFuturesUsd = Binance<BinanceServerFuturesUsd>;
 
 /// [`Binance`] perpetual usd [`ExchangeServer`].
-#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Default)]
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Default, StreamConnectorMeta)]
+#[connector(exchange = "binance", sub_module = "futures")]
 pub struct BinanceServerFuturesUsd;
 
 impl ExchangeServer for BinanceServerFuturesUsd {

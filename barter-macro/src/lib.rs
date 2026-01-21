@@ -11,6 +11,7 @@
 //! - [`SerExchange`] - Derives `serde::Serialize` for exchange marker types
 //! - [`DeSubKind`] - Derives `serde::Deserialize` for subscription kind types
 //! - [`SerSubKind`] - Derives `serde::Serialize` for subscription kind types
+//! - [`StreamConnectorMeta`] - Derives `StreamConnectorMeta` trait for connector types
 //!
 //! ### Procedural Macros
 //!
@@ -160,6 +161,48 @@ pub fn ser_sub_kind_derive(input: TokenStream) -> TokenStream {
     TokenStream::from(generated)
 }
 
+/// Derives `StreamConnectorMeta` trait for connector types.
+///
+/// This macro generates metadata about exchange connectors that can be queried
+/// at compile-time by the `define_stream_connectors!` macro.
+///
+/// # Attributes
+///
+/// - `#[connector(exchange = "...")]` - Exchange module root (required)
+/// - `#[connector(sub_module = "...")]` - Sub-module path (optional)
+/// - `#[connector(market = "...")]` - Market type name (optional, defaults to {Exchange}Market)
+/// - `#[connector(channel = "...")]` - Channel type name (optional, defaults to {Exchange}Channel)
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use barter_macro::StreamConnectorMeta;
+///
+/// // Simple connector
+/// #[derive(StreamConnectorMeta)]
+/// #[connector(exchange = "coinbase")]
+/// pub struct Coinbase;
+///
+/// // Connector with sub-module
+/// #[derive(StreamConnectorMeta)]
+/// #[connector(exchange = "binance", sub_module = "spot")]
+/// pub struct BinanceServerSpot;
+///
+/// // Connector with custom type names
+/// #[derive(StreamConnectorMeta)]
+/// #[connector(
+///     exchange = "custom",
+///     market = "CustomMarketType",
+///     channel = "CustomChannelType"
+/// )]
+/// pub struct CustomConnector;
+/// ```
+#[proc_macro_derive(StreamConnectorMeta, attributes(connector))]
+pub fn stream_connector_meta_derive(input: TokenStream) -> TokenStream {
+    connector_meta::derive_stream_connector_meta(input)
+}
+
+mod connector_meta;
 mod stream_registry;
 use stream_registry::StreamConnectorsInput;
 

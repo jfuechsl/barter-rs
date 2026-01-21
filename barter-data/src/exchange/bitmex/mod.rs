@@ -18,8 +18,8 @@ use barter_integration::{
     error::SocketError,
     protocol::websocket::{WebSocketSerdeParser, WsMessage},
 };
+use barter_macro::{DeExchange, SerExchange, StreamConnectorMeta};
 use derive_more::Display;
-use serde::de::{Error, Unexpected};
 use std::fmt::Debug;
 use url::Url;
 
@@ -49,7 +49,22 @@ pub type BitmexWsStream<Transformer> = ExchangeWsStream<WebSocketSerdeParser, Tr
 /// See docs: <https://www.bitmex.com/app/wsAPI>
 pub const BASE_URL_BITMEX: &str = "wss://ws.bitmex.com/realtime";
 
-#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Default, Display)]
+#[derive(
+    Copy,
+    Clone,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Hash,
+    Debug,
+    Default,
+    Display,
+    DeExchange,
+    SerExchange,
+    StreamConnectorMeta,
+)]
+#[connector(exchange = "bitmex")]
 pub struct Bitmex;
 
 impl Connector for Bitmex {
@@ -93,28 +108,3 @@ where
         BitmexWsStream<StatelessTransformer<Self, Instrument::Key, PublicTrades, BitmexTrade>>;
 }
 
-impl<'de> serde::Deserialize<'de> for Bitmex {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::de::Deserializer<'de>,
-    {
-        let input = <&str as serde::Deserialize>::deserialize(deserializer)?;
-        if input == Self::ID.as_str() {
-            Ok(Self)
-        } else {
-            Err(Error::invalid_value(
-                Unexpected::Str(input),
-                &Self::ID.as_str(),
-            ))
-        }
-    }
-}
-
-impl serde::Serialize for Bitmex {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::ser::Serializer,
-    {
-        serializer.serialize_str(Self::ID.as_str())
-    }
-}

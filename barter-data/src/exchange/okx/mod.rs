@@ -14,7 +14,7 @@ use barter_integration::{
     error::SocketError,
     protocol::websocket::{WebSocketSerdeParser, WsMessage},
 };
-use barter_macro::{DeExchange, SerExchange};
+use barter_macro::{DeExchange, SerExchange, StreamConnectorMeta};
 use derive_more::Display;
 use serde_json::json;
 use std::time::Duration;
@@ -64,7 +64,9 @@ pub type OkxWsStream<Transformer> = ExchangeWsStream<WebSocketSerdeParser, Trans
     Display,
     DeExchange,
     SerExchange,
+    StreamConnectorMeta,
 )]
+#[connector(exchange = "okx")]
 pub struct Okx;
 
 impl Connector for Okx {

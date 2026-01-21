@@ -1,5 +1,6 @@
 use super::{Bybit, ExchangeServer};
 use barter_instrument::exchange::ExchangeId;
+use barter_macro::StreamConnectorMeta;
 use std::fmt::Display;
 
 /// [`BybitPerpetualsUsd`] WebSocket server base url.
@@ -11,7 +12,8 @@ pub const WEBSOCKET_BASE_URL_BYBIT_PERPETUALS_USD: &str = "wss://stream.bybit.co
 pub type BybitPerpetualsUsd = Bybit<BybitServerPerpetualsUsd>;
 
 /// [`Bybit`] perpetual [`ExchangeServer`].
-#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Default)]
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Default, StreamConnectorMeta)]
+#[connector(exchange = "bybit", sub_module = "futures")]
 pub struct BybitServerPerpetualsUsd;
 
 impl ExchangeServer for BybitServerPerpetualsUsd {

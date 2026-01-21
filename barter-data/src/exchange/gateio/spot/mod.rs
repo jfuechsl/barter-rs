@@ -8,7 +8,7 @@ use crate::{
     transformer::stateless::StatelessTransformer,
 };
 use barter_instrument::exchange::ExchangeId;
-use barter_macro::{DeExchange, SerExchange};
+use barter_macro::{DeExchange, SerExchange, StreamConnectorMeta};
 use std::fmt::Display;
 
 /// Public trades types.
@@ -24,8 +24,20 @@ pub type GateioSpot = Gateio<GateioServerSpot>;
 
 /// [`Gateio`] spot [`ExchangeServer`].
 #[derive(
-    Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Default, DeExchange, SerExchange,
+    Copy,
+    Clone,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Hash,
+    Debug,
+    Default,
+    DeExchange,
+    SerExchange,
+    StreamConnectorMeta,
 )]
+#[connector(exchange = "gateio", sub_module = "spot")]
 pub struct GateioServerSpot;
 
 impl ExchangeServer for GateioServerSpot {

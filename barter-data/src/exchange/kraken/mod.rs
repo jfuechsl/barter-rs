@@ -15,7 +15,7 @@ use barter_integration::{
     error::SocketError,
     protocol::websocket::{WebSocketSerdeParser, WsMessage},
 };
-use barter_macro::{DeExchange, SerExchange};
+use barter_macro::{DeExchange, SerExchange, StreamConnectorMeta};
 use derive_more::Display;
 use serde_json::json;
 use url::Url;
@@ -65,7 +65,9 @@ pub type KrakenWsStream<Transformer> = ExchangeWsStream<WebSocketSerdeParser, Tr
     Display,
     DeExchange,
     SerExchange,
+    StreamConnectorMeta,
 )]
+#[connector(exchange = "kraken")]
 pub struct Kraken;
 
 impl Connector for Kraken {

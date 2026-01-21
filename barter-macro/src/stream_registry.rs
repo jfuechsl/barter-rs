@@ -229,6 +229,17 @@ impl ConnectorMetadata {
     /// Returns `Ok(ConnectorMetadata)` with the derived information, or an error
     /// if the connector type is not recognized.
     ///
+    /// # Implementation Note
+    ///
+    /// This function contains hardcoded mappings from connector names to their metadata.
+    /// While all connectors now implement the `StreamConnectorMeta` trait (which provides
+    /// the same metadata), we still need these hardcoded mappings at macro expansion time
+    /// to generate the import statements. Trait constants are only available after the
+    /// types are defined, but the macro needs module paths before generating code.
+    ///
+    /// The trait bounds added to the where clauses ensure that the hardcoded mappings
+    /// and trait implementations stay in sync. If they don't match, compilation will fail.
+    ///
     /// # Supported Connectors
     ///
     /// See module-level documentation for the complete list of supported connectors.
@@ -376,6 +387,7 @@ impl StreamConnectorsInput {
 
                 // Where Bound
                 let where_bound = quote! {
+                    #connector: crate::exchange::connector_meta::StreamConnectorMeta,
                     Subscription<#connector, Instrument, #kind>: Identifier<#market> + Identifier<#channel>,
                 };
                 where_bounds.extend(where_bound);

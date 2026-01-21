@@ -186,3 +186,13 @@ where
         serializer.serialize_str(Self::ID.as_str())
     }
 }
+
+impl<Server> crate::exchange::connector_meta::StreamConnectorMeta for Bybit<Server>
+where
+    Server: crate::exchange::connector_meta::StreamConnectorMeta + ExchangeServer,
+{
+    const EXCHANGE_ROOT: &'static str = Server::EXCHANGE_ROOT;
+    const SUB_MODULE: Option<&'static str> = Server::SUB_MODULE;
+    const MARKET_TYPE: &'static str = Server::MARKET_TYPE;
+    const CHANNEL_TYPE: &'static str = Server::CHANNEL_TYPE;
+}
