@@ -4,8 +4,16 @@ use crate::{
     books::OrderBook,
     error::DataError,
     event::{MarketEvent, MarketIter},
-    exchange::binance::{
-        book::l2::BinanceOrderBookL2Snapshot, futures::BinanceFuturesUsd, market::BinanceMarket,
+    exchange::{
+        Connector,
+        binance::{
+            book::{
+                l2::{BinanceOrderBookL2Meta, BinanceOrderBookL2Snapshot},
+                sequencer::BinanceSequenceValidator,
+            },
+            futures::BinanceFuturesUsd,
+            market::BinanceMarket,
+        },
     },
     instrument::InstrumentData,
     subscription::{
@@ -116,50 +124,20 @@ impl BinanceFuturesUsdOrderBookL2Sequencer {
             last_update_id,
         }
     }
+}
 
-    /// BinanceFuturesUsd: How To Manage A Local OrderBook Correctly
-    /// See Self's Rust Docs for more information on each numbered step
-    /// See docs: <https://binance-docs.github.io/apidocs/futures/en/#how-to-manage-a-local-order-book-correctly>
-    pub fn validate_sequence(
-        &mut self,
-        update: BinanceFuturesOrderBookL2Update,
-    ) -> Result<Option<BinanceFuturesOrderBookL2Update>, DataError> {
-        // 4. Drop any event where u is < lastUpdateId in the snapshot:
-        if update.last_update_id < self.last_update_id {
-            return Ok(None);
-        }
+impl BinanceSequenceValidator for BinanceFuturesUsdOrderBookL2Sequencer {
+    type Update = BinanceFuturesOrderBookL2Update;
 
-        if self.is_first_update() {
-            // 5. The first processed event should have U <= lastUpdateId AND u >= lastUpdateId:
-            self.validate_first_update(&update)?;
-        } else {
-            // 6. Each new event's pu should be equal to the previous event's u:
-            self.validate_next_update(&update)?;
-        }
-
-        // Update metadata
-        self.updates_processed += 1;
-        self.last_update_id = update.last_update_id;
-
-        Ok(Some(update))
-    }
-
-    /// BinanceFuturesUsd: How To Manage A Local OrderBook Correctly: Step 5:
-    /// "The first processed event should have U <= lastUpdateId AND u >= lastUpdateId"
-    ///
-    /// See docs: <https://binance-docs.github.io/apidocs/futures/en/#how-to-manage-a-local-order-book-correctly>
-    pub fn is_first_update(&self) -> bool {
+    fn is_first_update(&self) -> bool {
         self.updates_processed == 0
     }
 
-    /// BinanceFuturesUsd: How To Manage A Local OrderBook Correctly: Step 5:
-    /// "The first processed event should have U <= lastUpdateId AND u >= lastUpdateId"
-    ///
-    /// See docs: <https://binance-docs.github.io/apidocs/futures/en/#how-to-manage-a-local-order-book-correctly>
-    pub fn validate_first_update(
-        &self,
-        update: &BinanceFuturesOrderBookL2Update,
-    ) -> Result<(), DataError> {
+    fn is_outdated(&self, update: &Self::Update) -> bool {
+        update.last_update_id < self.last_update_id
+    }
+
+    fn validate_first_update(&self, update: &Self::Update) -> Result<(), DataError> {
         if update.first_update_id <= self.last_update_id
             && update.last_update_id >= self.last_update_id
         {
@@ -172,15 +150,7 @@ impl BinanceFuturesUsdOrderBookL2Sequencer {
         }
     }
 
-    /// BinanceFuturesUsd: How To Manage A Local OrderBook Correctly: Step 6:
-    /// "While listening to the stream, each new event's pu should be equal to the previous
-    ///  event's u, otherwise initialize the process from step 3."
-    ///
-    /// See docs: <https://binance-docs.github.io/apidocs/futures/en/#how-to-manage-a-local-order-book-correctly>
-    pub fn validate_next_update(
-        &self,
-        update: &BinanceFuturesOrderBookL2Update,
-    ) -> Result<(), DataError> {
+    fn validate_next_update(&self, update: &Self::Update) -> Result<(), DataError> {
         if update.prev_last_update_id == self.last_update_id {
             Ok(())
         } else {
@@ -189,6 +159,11 @@ impl BinanceFuturesUsdOrderBookL2Sequencer {
                 first_update_id: update.first_update_id,
             })
         }
+    }
+
+    fn apply_update(&mut self, update: &Self::Update) {
+        self.updates_processed += 1;
+        self.last_update_id = update.last_update_id;
     }
 }
 

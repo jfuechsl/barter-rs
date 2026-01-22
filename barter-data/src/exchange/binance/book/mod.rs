@@ -8,6 +8,9 @@ pub mod l1;
 /// Level 2 OrderBook types.
 pub mod l2;
 
+/// Sequencer trait for Binance order book validation.
+pub mod sequencer;
+
 /// [`Binance`](super::Binance) OrderBook level.
 ///
 /// #### Raw Payload Examples

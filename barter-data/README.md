@@ -166,20 +166,151 @@ Your contribution will allow me to dedicate more time to Barter, accelerating fe
 Please see [here](../README.md#support-barter-development) for more information.
 
 ## Contributing
-Thanks in advance for helping to develop the Barter ecosystem! Please do get hesitate to get touch via the Discord 
+Thanks in advance for helping to develop the Barter ecosystem! Please do get hesitate to get touch via the Discord
 [Chat] to discuss development, new features, and the future roadmap.
 
-### Adding A New Exchange Connector
-1. Add a new `Connector` trait implementation in src/exchange/<exchange_name>.mod.rs (eg/ see exchange::okx::Okx).
-2. Follow on from "Adding A New Subscription Kind For An Existing Exchange Connector" below!
+For comprehensive developer documentation on extending Barter-Data, see the [API Documentation] which includes
+detailed guides on adding new exchanges and subscription kinds.
 
-### Adding A New SubscriptionKind For An Existing Exchange Connector
-1. Add a new `SubscriptionKind` trait implementation in src/subscription/<sub_kind_name>.rs (eg/ see subscription::trade::PublicTrades).
-2. Define the `SubscriptionKind::Event` data model (eg/ see subscription::trade::PublicTrade).
-3. Define the `MarketStream` type the exchange `Connector` will initialise for the new `SubscriptionKind`: <br>
-   ie/ `impl StreamSelector<SubscriptionKind> for <ExistingExchangeConnector> { ... }`
-4. Try to compile and follow the remaining steps!
-5. Add a barter-data-rs/examples/<sub_kind_name>_streams.rs example in the standard format :)
+### Quick Start: Adding A New Exchange Connector
+
+Follow these steps to add support for a new exchange. For detailed documentation, see the [developer guide](https://docs.rs/barter-data/latest/barter_data/developer_guide/index.html) in the API docs.
+
+#### 1. Create Exchange Module Structure
+```
+src/exchange/my_exchange/
+├── mod.rs           # Connector implementation
+├── channel.rs       # Channel type for WebSocket channels
+├── market.rs        # Market type for instrument identifiers
+├── subscription.rs  # Subscription response validation
+└── trade.rs         # PublicTrades implementation (example)
+```
+
+#### 2. Implement the Connector Trait
+In `src/exchange/my_exchange/mod.rs`:
+```rust
+use crate::exchange::Connector;
+use barter_instrument::exchange::ExchangeId;
+
+#[derive(Clone, Default, Debug, Deserialize, Serialize)]
+pub struct MyExchange;
+
+impl Connector for MyExchange {
+    const ID: ExchangeId = ExchangeId::MyExchange;  // Add to barter_instrument
+    type Channel = MyExchangeChannel;
+    type Market = MyExchangeMarket;
+    type Subscriber = WebSocketSubscriber;
+    type SubValidator = WebSocketSubValidator;
+    type SubResponse = MyExchangeSubResponse;
+
+    fn url() -> Result<Url, SocketError> {
+        Url::parse("wss://api.myexchange.com/ws").map_err(SocketError::UrlParse)
+    }
+
+    fn requests(exchange_subs: Vec<ExchangeSub<Self::Channel, Self::Market>>) -> Vec<WsMessage> {
+        // Build exchange-specific subscription request payloads
+        vec![WsMessage::text(
+            json!({ "method": "subscribe", "params": exchange_subs }).to_string()
+        )]
+    }
+}
+```
+
+#### 3. Implement Channel and Market Types
+Define how Barter subscriptions map to exchange-specific channels and markets:
+
+**channel.rs:**
+```rust
+#[derive(Clone, Debug, Serialize)]
+pub struct MyExchangeChannel(pub &'static str);
+
+impl MyExchangeChannel {
+    pub const TRADES: Self = Self("trades");
+}
+
+impl<Instrument> Identifier<MyExchangeChannel> for Subscription<MyExchange, Instrument, PublicTrades> {
+    fn id(&self) -> MyExchangeChannel {
+        MyExchangeChannel::TRADES
+    }
+}
+```
+
+**market.rs:**
+```rust
+#[derive(Clone, Debug, Serialize)]
+pub struct MyExchangeMarket(pub String);
+
+impl<Instrument> Identifier<MyExchangeMarket> for Subscription<MyExchange, Instrument, PublicTrades>
+where
+    Instrument: InstrumentData,
+{
+    fn id(&self) -> MyExchangeMarket {
+        // Convert instrument to exchange format (e.g., "BTC-USDT")
+        MyExchangeMarket(format!("{}-{}",
+            self.instrument.base_asset().as_str().to_uppercase(),
+            self.instrument.quote_asset().as_str().to_uppercase()
+        ))
+    }
+}
+```
+
+#### 4. Implement StreamSelector for Subscription Kinds
+For each supported subscription kind (e.g., `PublicTrades`), implement `StreamSelector`:
+```rust
+impl<Instrument> StreamSelector<Instrument, PublicTrades> for MyExchange
+where
+    Instrument: InstrumentData,
+{
+    type SnapFetcher = NoInitialSnapshots;
+    type Stream = MyExchangeWsStream<StatelessTransformer<Self, Instrument::Key, PublicTrades, MyExchangeTrades>>;
+}
+```
+
+#### 5. Create Exchange Message Types and Transformers
+Define the exchange-specific message format and implement transformation to Barter's normalized types:
+```rust
+#[derive(Debug, Deserialize)]
+pub struct MyExchangeTrades {
+    pub subscription_id: SubscriptionId,
+    pub data: Vec<MyExchangeTrade>,
+}
+
+impl<InstrumentKey: Clone> From<(ExchangeId, InstrumentKey, MyExchangeTrades)>
+    for MarketIter<InstrumentKey, PublicTrade>
+{
+    fn from((exchange, instrument, trades): (ExchangeId, InstrumentKey, MyExchangeTrades)) -> Self {
+        trades.data.into_iter().map(|trade| {
+            Ok(MarketEvent {
+                time_exchange: trade.timestamp,
+                time_received: Utc::now(),
+                exchange,
+                instrument: instrument.clone(),
+                kind: PublicTrade {
+                    id: trade.id,
+                    price: trade.price,
+                    amount: trade.quantity,
+                    side: trade.side,
+                },
+            })
+        }).collect()
+    }
+}
+```
+
+#### 6. Add Tests and Examples
+- Add unit tests for deserialization and transformation
+- Create an example in `examples/my_exchange_trades.rs`
+- Test with real exchange data
+
+See the [complete developer guide](https://docs.rs/barter-data/latest/barter_data/developer_guide/index.html) for more details, including:
+- Adding new subscription kinds to existing exchanges
+- Implementing stateful transformers for OrderBooks
+- Custom snapshot fetchers for L2/L3 order books
+- Handling exchange-specific edge cases
+
+### Adding A New SubscriptionKind
+
+See the [developer guide on adding subscription kinds](https://docs.rs/barter-data/latest/barter_data/developer_guide/adding_subscription_kinds/index.html) for comprehensive instructions.
 
 ### Licence
 This project is licensed under the [MIT license].

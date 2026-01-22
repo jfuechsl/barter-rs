@@ -167,6 +167,18 @@ pub use transformer::sequenced::{
     OrderBookL2Sequencer, SequencedInstrument, SequencedOrderBookL2Transformer,
 };
 
+/// Comprehensive developer guide for extending Barter-Data with new exchange connectors
+/// and subscription kinds.
+///
+/// This module contains detailed step-by-step tutorials and best practices for:
+/// - Adding support for new cryptocurrency exchanges
+/// - Implementing new subscription kinds (e.g., funding rates, liquidations)
+/// - Advanced topics like stateful transformers and custom snapshot fetchers
+/// - Testing and validation strategies
+///
+/// See the [module documentation](developer_guide/index.html) for the complete guide.
+pub mod developer_guide;
+
 /// Convenient type alias for an [`ExchangeStream`] utilizing a tungstenite
 /// [`WebSocket`](barter_integration::protocol::websocket::WebSocket).
 pub type ExchangeWsStream<Parser, Transformer> = ExchangeStream<Parser, WsStream, Transformer>;
