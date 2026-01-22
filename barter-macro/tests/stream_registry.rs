@@ -19,7 +19,6 @@ fn test_macro_compiles_with_valid_input() {
 
     // This test passing means the proc-macro crate builds successfully
     // and can be invoked without panicking.
-    assert!(true);
 }
 
 /// Test module demonstrating the expected macro syntax.
@@ -83,9 +82,11 @@ mod validation_tests {
             "PublicTrades",
             "OrderBooksL1",
             "OrderBooksL2",
+            "OrderBooksL3",
             "Liquidations",
+            "Candles",
         ];
-        assert_eq!(supported.len(), 4);
+        assert_eq!(supported.len(), 6);
     }
 
     #[test]
@@ -119,7 +120,9 @@ mod validation_tests {
             ("PublicTrades", "trades"),
             ("OrderBooksL1", "l1s"),
             ("OrderBooksL2", "l2s"),
+            ("OrderBooksL3", "l3s"),
             ("Liquidations", "liquidations"),
+            ("Candles", "candles"),
         ];
 
         for (kind, channel) in mappings {
