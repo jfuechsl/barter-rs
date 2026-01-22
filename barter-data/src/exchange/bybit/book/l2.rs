@@ -185,7 +185,7 @@ mod tests {
 
         // Process multiple sequential deltas
         for update_id in 101..=105 {
-            let delta = make_delta(update_id, update_id as u64);
+            let delta = make_delta(update_id, update_id);
             let result = seq.validate(delta.clone());
 
             assert!(result.is_ok());
