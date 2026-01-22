@@ -5,10 +5,9 @@ use crate::{
     error::DataError,
     event::{MarketEvent, MarketIter},
     exchange::{
-        Connector,
         binance::{
             book::{
-                l2::{BinanceOrderBookL2Meta, BinanceOrderBookL2Snapshot},
+                l2::BinanceOrderBookL2Snapshot,
                 sequencer::BinanceSequenceValidator,
             },
             market::BinanceMarket,
