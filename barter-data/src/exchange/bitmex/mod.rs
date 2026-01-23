@@ -107,4 +107,3 @@ where
     type Stream =
         BitmexWsStream<StatelessTransformer<Self, Instrument::Key, PublicTrades, BitmexTrade>>;
 }
-

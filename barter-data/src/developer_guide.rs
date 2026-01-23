@@ -584,4 +584,3 @@
 //! - Review existing exchange implementations in `src/exchange/`
 //! - Ask on [Discord](https://discord.gg/wE7RqhnQMV)
 //! - Open an issue on [GitHub](https://github.com/barter-rs/barter-rs)
-

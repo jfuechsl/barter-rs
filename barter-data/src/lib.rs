@@ -418,3 +418,11 @@ pub mod test_utils {
         }
     }
 }
+
+#[cfg(test)]
+mod test_deps {
+    // tracing-subscriber is used in examples, not in tests or library code.
+    // This reference satisfies the unused_crate_dependencies lint.
+    #[allow(unused_imports)]
+    use tracing_subscriber as _;
+}

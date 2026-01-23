@@ -153,7 +153,9 @@ impl ConnectivityStates {
 /// Used to track both market data and account connections in a [`ConnectivityState`].
 ///
 /// Default implementation is [`Health::Reconnecting`].
-#[derive(Debug, Default, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Deserialize, Serialize)]
+#[derive(
+    Debug, Default, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Deserialize, Serialize,
+)]
 pub enum Health {
     /// Connection is established and functioning normally.
     Healthy,

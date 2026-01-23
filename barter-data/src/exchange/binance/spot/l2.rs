@@ -4,15 +4,10 @@ use crate::{
     books::OrderBook,
     error::DataError,
     event::{MarketEvent, MarketIter},
-    exchange::{
-        binance::{
-            book::{
-                l2::BinanceOrderBookL2Snapshot,
-                sequencer::BinanceSequenceValidator,
-            },
-            market::BinanceMarket,
-            spot::BinanceSpot,
-        },
+    exchange::binance::{
+        book::{l2::BinanceOrderBookL2Snapshot, sequencer::BinanceSequenceValidator},
+        market::BinanceMarket,
+        spot::BinanceSpot,
     },
     instrument::InstrumentData,
     subscription::{

@@ -97,3 +97,11 @@ pub trait Terminal {
     Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Deserialize, Serialize,
 )]
 pub struct FeedEnded;
+
+#[cfg(test)]
+mod test_deps {
+    // sha2 is used in examples (signed_get_request.rs), not in tests or library code.
+    // This reference satisfies the unused_crate_dependencies lint.
+    #[allow(unused_imports)]
+    use sha2 as _;
+}

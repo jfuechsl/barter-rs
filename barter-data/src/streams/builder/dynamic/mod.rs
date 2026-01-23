@@ -283,7 +283,9 @@ impl<InstrumentKey> DynamicStreams<InstrumentKey> {
     pub fn select_all_candles(
         &mut self,
     ) -> SelectAll<UnboundedReceiverStream<MarketStreamResult<InstrumentKey, Candle>>> {
-        futures_util::stream::select_all::select_all(std::mem::take(&mut self.candles).into_values())
+        futures_util::stream::select_all::select_all(
+            std::mem::take(&mut self.candles).into_values(),
+        )
     }
 
     /// Select and merge every exchange `Stream` for every data type using [`select_all`](futures_util::stream::select_all::select_all)
@@ -447,9 +449,10 @@ where
                     }
                 }
                 SubKind::Candles => {
-                    if let (None, None) =
-                        (txs.candles.get(&sub.exchange), rxs.candles.get(&sub.exchange))
-                    {
+                    if let (None, None) = (
+                        txs.candles.get(&sub.exchange),
+                        rxs.candles.get(&sub.exchange),
+                    ) {
                         let (tx, rx) = mpsc_unbounded();
                         txs.candles.insert(sub.exchange, tx);
                         rxs.candles.insert(sub.exchange, rx);
@@ -533,6 +536,7 @@ impl<InstrumentKey> Default for Rxs<InstrumentKey> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::subscription::{book::OrderBooksL3, candle::Candles};
     use barter_instrument::instrument::market_data::{
         MarketDataInstrument, kind::MarketDataInstrumentKind,
     };
@@ -544,9 +548,11 @@ mod tests {
     #[test]
     fn test_channels_validation_passes_for_created_channels() {
         let subscriptions: Vec<Vec<Subscription<ExchangeId, MarketDataInstrument, SubKind>>> =
-            vec![vec![
-                Subscription::new(ExchangeId::BinanceSpot, test_instrument(), SubKind::PublicTrades),
-            ]];
+            vec![vec![Subscription::new(
+                ExchangeId::BinanceSpot,
+                test_instrument(),
+                SubKind::PublicTrades,
+            )]];
 
         let channels = Channels::<MarketDataInstrument>::try_from(&subscriptions);
         assert!(
@@ -564,9 +570,21 @@ mod tests {
     fn test_channels_validation_passes_for_multiple_exchanges() {
         let subscriptions: Vec<Vec<Subscription<ExchangeId, MarketDataInstrument, SubKind>>> =
             vec![vec![
-                Subscription::new(ExchangeId::BinanceSpot, test_instrument(), SubKind::PublicTrades),
-                Subscription::new(ExchangeId::Coinbase, test_instrument(), SubKind::PublicTrades),
-                Subscription::new(ExchangeId::BinanceSpot, test_instrument(), SubKind::OrderBooksL1),
+                Subscription::new(
+                    ExchangeId::BinanceSpot,
+                    test_instrument(),
+                    SubKind::PublicTrades,
+                ),
+                Subscription::new(
+                    ExchangeId::Coinbase,
+                    test_instrument(),
+                    SubKind::PublicTrades,
+                ),
+                Subscription::new(
+                    ExchangeId::BinanceSpot,
+                    test_instrument(),
+                    SubKind::OrderBooksL1,
+                ),
             ]];
 
         let channels = Channels::<MarketDataInstrument>::try_from(&subscriptions);
@@ -588,8 +606,16 @@ mod tests {
         // Same subscription repeated should only create one channel
         let subscriptions: Vec<Vec<Subscription<ExchangeId, MarketDataInstrument, SubKind>>> =
             vec![vec![
-                Subscription::new(ExchangeId::BinanceSpot, test_instrument(), SubKind::PublicTrades),
-                Subscription::new(ExchangeId::BinanceSpot, test_instrument(), SubKind::PublicTrades),
+                Subscription::new(
+                    ExchangeId::BinanceSpot,
+                    test_instrument(),
+                    SubKind::PublicTrades,
+                ),
+                Subscription::new(
+                    ExchangeId::BinanceSpot,
+                    test_instrument(),
+                    SubKind::PublicTrades,
+                ),
             ]];
 
         let channels = Channels::<MarketDataInstrument>::try_from(&subscriptions);
@@ -609,9 +635,21 @@ mod tests {
     fn test_channels_validation_with_all_sub_kinds() {
         let subscriptions: Vec<Vec<Subscription<ExchangeId, MarketDataInstrument, SubKind>>> =
             vec![vec![
-                Subscription::new(ExchangeId::BinanceSpot, test_instrument(), SubKind::PublicTrades),
-                Subscription::new(ExchangeId::BinanceSpot, test_instrument(), SubKind::OrderBooksL1),
-                Subscription::new(ExchangeId::BinanceSpot, test_instrument(), SubKind::OrderBooksL2),
+                Subscription::new(
+                    ExchangeId::BinanceSpot,
+                    test_instrument(),
+                    SubKind::PublicTrades,
+                ),
+                Subscription::new(
+                    ExchangeId::BinanceSpot,
+                    test_instrument(),
+                    SubKind::OrderBooksL1,
+                ),
+                Subscription::new(
+                    ExchangeId::BinanceSpot,
+                    test_instrument(),
+                    SubKind::OrderBooksL2,
+                ),
                 Subscription::new(
                     ExchangeId::BinanceFuturesUsd,
                     test_instrument(),
@@ -630,9 +668,22 @@ mod tests {
         assert!(channels.txs.trades.contains_key(&ExchangeId::BinanceSpot));
         assert!(channels.txs.l1s.contains_key(&ExchangeId::BinanceSpot));
         assert!(channels.txs.l2s.contains_key(&ExchangeId::BinanceSpot));
-        assert!(channels
-            .txs
-            .liquidations
-            .contains_key(&ExchangeId::BinanceFuturesUsd));
+        assert!(
+            channels
+                .txs
+                .liquidations
+                .contains_key(&ExchangeId::BinanceFuturesUsd)
+        );
+    }
+
+    #[test]
+    fn test_channel_field_constants_match_expected_values() {
+        // Verify CHANNEL_FIELD constants match the field names in DynamicStreams/Txs/Rxs
+        assert_eq!(PublicTrades::CHANNEL_FIELD, "trades");
+        assert_eq!(OrderBooksL1::CHANNEL_FIELD, "l1s");
+        assert_eq!(OrderBooksL2::CHANNEL_FIELD, "l2s");
+        assert_eq!(OrderBooksL3::CHANNEL_FIELD, "l3s");
+        assert_eq!(Liquidations::CHANNEL_FIELD, "liquidations");
+        assert_eq!(Candles::CHANNEL_FIELD, "candles");
     }
 }

@@ -371,3 +371,27 @@ where
 //Note: The impl_market_identifier! and impl_channel_identifier! macros are thoroughly
 // tested through their usage in concrete exchange implementations (Binance, Bybit, etc.).
 // Compile-fail tests for macro error cases are in barter-macro/tests/ instead.
+
+#[cfg(test)]
+mod macro_tests {
+    use super::*;
+    use crate::{
+        exchange::binance::{market::BinanceMarket, spot::BinanceSpot},
+        subscription::trade::PublicTrades,
+    };
+    use barter_instrument::instrument::market_data::{
+        MarketDataInstrument, kind::MarketDataInstrumentKind,
+    };
+
+    #[test]
+    fn test_impl_market_identifier_generates_correct_impl() {
+        // Verify macro-generated Identifier impl compiles and works
+        let sub: Subscription<_, MarketDataInstrument, _> = Subscription::new(
+            BinanceSpot::default(),
+            MarketDataInstrument::from(("btc", "usdt", MarketDataInstrumentKind::Spot)),
+            PublicTrades,
+        );
+
+        let _market: BinanceMarket = sub.id(); // Should compile if macro works
+    }
+}

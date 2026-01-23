@@ -28,7 +28,9 @@ pub const WEBSOCKET_BASE_URL_BINANCE_SPOT: &str = "wss://stream.binance.com:9443
 pub type BinanceSpot = Binance<BinanceServerSpot>;
 
 /// [`Binance`] spot [`ExchangeServer`].
-#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Default, StreamConnectorMeta)]
+#[derive(
+    Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Default, StreamConnectorMeta,
+)]
 #[connector(exchange = "binance", sub_module = "spot")]
 pub struct BinanceServerSpot;
 

@@ -2,7 +2,7 @@ use convert_case::{Case, Casing};
 use darling::FromDeriveInput;
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, DeriveInput};
+use syn::{DeriveInput, parse_macro_input};
 
 /// Options parsed from `#[derive(StreamConnectorMeta)]` and `#[connector(...)]` attributes.
 #[derive(FromDeriveInput)]

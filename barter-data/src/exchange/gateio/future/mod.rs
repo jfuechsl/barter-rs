@@ -21,7 +21,9 @@ pub const WEBSOCKET_BASE_URL_GATEIO_FUTURES_USD: &str = "wss://fx-ws.gateio.ws/v
 pub type GateioFuturesUsd = Gateio<GateioServerFuturesUsd>;
 
 /// [`Gateio`] perpetual usd [`ExchangeServer`].
-#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Default, StreamConnectorMeta)]
+#[derive(
+    Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Default, StreamConnectorMeta,
+)]
 #[connector(exchange = "gateio", sub_module = "future")]
 pub struct GateioServerFuturesUsd;
 
@@ -58,7 +60,9 @@ pub const WEBSOCKET_BASE_URL_GATEIO_FUTURES_BTC: &str = "wss://fx-ws.gateio.ws/v
 pub type GateioFuturesBtc = Gateio<GateioServerFuturesBtc>;
 
 /// [`Gateio`] perpetual btc [`ExchangeServer`].
-#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Default, StreamConnectorMeta)]
+#[derive(
+    Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Default, StreamConnectorMeta,
+)]
 #[connector(exchange = "gateio", sub_module = "future")]
 pub struct GateioServerFuturesBtc;
 

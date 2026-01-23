@@ -247,3 +247,22 @@ mod error_documentation {
         // The actual test is in the doc test above.
     }
 }
+
+/// Tests for the StreamConnectorMeta derive macro.
+///
+/// This module verifies that the #[derive(StreamConnectorMeta)] macro
+/// is available and can be imported.
+mod connector_metadata {
+    // Import kept for documentation purposes - demonstrates the macro is available
+    #[allow(unused_imports)]
+    use barter_macro::StreamConnectorMeta;
+
+    #[test]
+    fn test_connector_metadata_macro_available() {
+        // The StreamConnectorMeta derive macro is tested through its usage in
+        // concrete exchange connector implementations (BinanceSpot, BybitSpot, etc.)
+        // in the barter-data crate. Testing it in isolation here would require
+        // duplicating the entire exchange module structure, so we verify compilation
+        // through actual usage instead.
+    }
+}
