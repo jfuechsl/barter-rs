@@ -25,6 +25,7 @@
 //! | Bitfinex | `Bitfinex` | `BitfinexMarket` |
 //! | Bitmex | `Bitmex` | `BitmexMarket` |
 //! | Coinbase | `Coinbase` | `CoinbaseMarket` |
+//! | Deribit | `Deribit` | `DeribitMarket` |
 //! | Gate.io | `GateioSpot`, `GateioFuturesUsd`, `GateioFuturesBtc`, `GateioPerpetualsBtc`, `GateioPerpetualsUsd`, `GateioOptions` | `GateioMarket` |
 //! | Kraken | `Kraken` | `KrakenMarket` |
 //! | OKX | `Okx` | `OkxMarket` |
@@ -272,6 +273,7 @@ impl ConnectorMetadata {
             "GateioPerpetualsBtc" => ("gateio", Some("perpetual"), "GateioMarket"),
             "GateioPerpetualsUsd" => ("gateio", Some("perpetual"), "GateioMarket"),
             "GateioOptions" => ("gateio", Some("option"), "GateioMarket"),
+            "Deribit" => ("deribit", None, "DeribitMarket"),
             "Kraken" => ("kraken", None, "KrakenMarket"),
             "Okx" => ("okx", None, "OkxMarket"),
             "Poloniex" => ("poloniex", None, "PoloniexMarket"),

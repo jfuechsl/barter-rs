@@ -26,6 +26,9 @@ pub mod bybit;
 /// `Coinbase` [`Connector`] and [`StreamSelector`] implementations.
 pub mod coinbase;
 
+/// `Deribit` [`Connector`] and [`StreamSelector`] implementations.
+pub mod deribit;
+
 /// `GateioSpot`, `GateioFuturesUsd` & `GateioFuturesBtc` [`Connector`] and [`StreamSelector`]
 /// implementations.
 pub mod gateio;

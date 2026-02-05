@@ -47,6 +47,7 @@ define_stream_connectors! {
     BybitSpot => [PublicTrades, OrderBooksL1, OrderBooksL2],
     BybitPerpetualsUsd => [PublicTrades, OrderBooksL1, OrderBooksL2],
     Coinbase => [PublicTrades],
+    Deribit => [PublicTrades, OrderBooksL1, OrderBooksL2],
     GateioSpot => [PublicTrades],
     GateioFuturesUsd => [PublicTrades],
     GateioFuturesBtc => [PublicTrades],
