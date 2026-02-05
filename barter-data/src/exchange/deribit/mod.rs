@@ -108,7 +108,14 @@ impl Connector for Deribit {
     fn requests(exchange_subs: Vec<ExchangeSub<Self::Channel, Self::Market>>) -> Vec<WsMessage> {
         let channels: Vec<String> = exchange_subs
             .into_iter()
-            .map(|sub| format!("{}.{}.{}", sub.channel.as_ref(), sub.market.as_ref(), "raw"))
+            .map(|sub| {
+                format!(
+                    "{}.{}.{}",
+                    sub.channel.as_ref(),
+                    sub.market.as_ref(),
+                    "100ms"
+                )
+            })
             .collect();
 
         vec![WsMessage::text(

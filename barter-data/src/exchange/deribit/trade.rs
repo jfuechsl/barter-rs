@@ -68,11 +68,27 @@ where
         }
 
         let wrapper = Wrapper::deserialize(deserializer)?;
+        let subscription_id = parse_deribit_channel(&wrapper.params.channel)
+            .map_err(|e| serde::de::Error::custom(e))?;
         Ok(DeribitMessage {
-            subscription_id: SubscriptionId::from(wrapper.params.channel),
+            subscription_id,
             data: wrapper.params.data,
         })
     }
+}
+
+/// Parse a Deribit channel string (e.g., "trades.BTC-PERPETUAL.100ms") into a
+/// standard Barter subscription ID format (e.g., "trades|BTC-PERPETUAL").
+fn parse_deribit_channel(channel: &str) -> Result<SubscriptionId, String> {
+    // Deribit channel format: {channel}.{market}.{interval}
+    // Example: "trades.BTC-PERPETUAL.100ms"
+    let parts: Vec<&str> = channel.split('.').collect();
+    if parts.len() < 2 {
+        return Err(format!("Invalid Deribit channel format: {}", channel));
+    }
+
+    // Create subscription ID in standard format: {channel}|{market}
+    Ok(SubscriptionId::from(format!("{}|{}", parts[0], parts[1])))
 }
 
 impl<T> Identifier<Option<SubscriptionId>> for DeribitMessage<T> {
@@ -95,9 +111,7 @@ pub struct DeribitTrade {
         deserialize_with = "barter_integration::de::de_u64_epoch_ms_as_datetime_utc"
     )]
     pub time: DateTime<Utc>,
-    #[serde(deserialize_with = "barter_integration::de::de_str")]
     pub price: f64,
-    #[serde(deserialize_with = "barter_integration::de::de_str")]
     pub amount: f64,
     pub direction: DeribitSide,
 }
@@ -161,19 +175,19 @@ mod tests {
                 "jsonrpc": "2.0",
                 "method": "subscription",
                 "params": {
-                    "channel": "trades.BTC-PERPETUAL.raw",
+                    "channel": "trades.BTC-PERPETUAL.100ms",
                     "data": [
                         {
                             "trade_seq": 2,
                             "trade_id": "48079289",
                             "timestamp": 1590484589306,
                             "tick_direction": 2,
-                            "price": "36289.5",
-                            "mark_price": "36288.31",
+                            "price": 36289.5,
+                            "mark_price": 36288.31,
                             "instrument_name": "BTC-PERPETUAL",
-                            "index_price": "36297.02",
+                            "index_price": 36297.02,
                             "direction": "sell",
-                            "amount": "10.5"
+                            "amount": 10.5
                         }
                     ]
                 }
@@ -185,7 +199,7 @@ mod tests {
                 datetime_utc_from_epoch_duration(Duration::from_millis(1590484589306));
 
             let expected: Result<DeribitTrades, SocketError> = Ok(DeribitTrades {
-                subscription_id: SubscriptionId::from("trades.BTC-PERPETUAL.raw"),
+                subscription_id: SubscriptionId::from("trades|BTC-PERPETUAL"),
                 data: vec![DeribitTrade {
                     id: "48079289".to_string(),
                     time: expected_time,
@@ -218,31 +232,31 @@ mod tests {
                 "jsonrpc": "2.0",
                 "method": "subscription",
                 "params": {
-                    "channel": "trades.ETH-PERPETUAL.raw",
+                    "channel": "trades.ETH-PERPETUAL.100ms",
                     "data": [
                         {
                             "trade_seq": 1,
                             "trade_id": "111",
                             "timestamp": 1590484589306,
                             "tick_direction": 0,
-                            "price": "2000.0",
-                            "mark_price": "2001.0",
+                            "price": 2000.0,
+                            "mark_price": 2001.0,
                             "instrument_name": "ETH-PERPETUAL",
-                            "index_price": "2000.5",
+                            "index_price": 2000.5,
                             "direction": "buy",
-                            "amount": "1.5"
+                            "amount": 1.5
                         },
                         {
                             "trade_seq": 2,
                             "trade_id": "112",
                             "timestamp": 1590484589310,
                             "tick_direction": 1,
-                            "price": "2000.5",
-                            "mark_price": "2001.0",
+                            "price": 2000.5,
+                            "mark_price": 2001.0,
                             "instrument_name": "ETH-PERPETUAL",
-                            "index_price": "2000.5",
+                            "index_price": 2000.5,
                             "direction": "sell",
-                            "amount": "2.0"
+                            "amount": 2.0
                         }
                     ]
                 }
@@ -250,6 +264,10 @@ mod tests {
             "#;
 
             let actual = serde_json::from_str::<DeribitTrades>(input).unwrap();
+            assert_eq!(
+                actual.subscription_id,
+                SubscriptionId::from("trades|ETH-PERPETUAL")
+            );
             assert_eq!(actual.data.len(), 2);
             assert_eq!(actual.data[0].id, "111");
             assert_eq!(actual.data[1].id, "112");
@@ -264,19 +282,19 @@ mod tests {
                 "jsonrpc": "2.0",
                 "method": "subscription",
                 "params": {
-                    "channel": "trades.BTC-27SEP24-50000-C.raw",
+                    "channel": "trades.BTC-27SEP24-50000-C.100ms",
                     "data": [
                         {
                             "trade_seq": 1,
                             "trade_id": "OPTION123",
                             "timestamp": 1590484589306,
                             "tick_direction": 0,
-                            "price": "0.005",
-                            "mark_price": "0.0051",
+                            "price": 0.005,
+                            "mark_price": 0.0051,
                             "instrument_name": "BTC-27SEP24-50000-C",
-                            "index_price": "45000",
+                            "index_price": 45000.0,
                             "direction": "buy",
-                            "amount": "10"
+                            "amount": 10.0
                         }
                     ]
                 }
@@ -284,6 +302,10 @@ mod tests {
             "#;
 
             let actual = serde_json::from_str::<DeribitTrades>(input).unwrap();
+            assert_eq!(
+                actual.subscription_id,
+                SubscriptionId::from("trades|BTC-27SEP24-50000-C")
+            );
             assert_eq!(actual.data.len(), 1);
             assert_eq!(actual.data[0].id, "OPTION123");
             assert_eq!(actual.data[0].price, 0.005);

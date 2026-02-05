@@ -1,10 +1,7 @@
-use super::Deribit;
-use crate::{
-    impl_channel_identifier,
-    subscription::{
-        book::{OrderBooksL1, OrderBooksL2},
-        trade::PublicTrades,
-    },
+use crate::Identifier;
+use crate::subscription::{
+    book::{OrderBooksL1, OrderBooksL2},
+    trade::PublicTrades,
 };
 use serde::Serialize;
 
@@ -32,13 +29,40 @@ impl DeribitChannel {
     pub const BOOK: Self = Self("book");
 }
 
-impl_channel_identifier!(Deribit, Instrument => DeribitChannel, PublicTrades => DeribitChannel::TRADES);
-impl_channel_identifier!(Deribit, Instrument => DeribitChannel, OrderBooksL1 => DeribitChannel::TICKER);
-impl_channel_identifier!(Deribit, Instrument => DeribitChannel, OrderBooksL2 => DeribitChannel::BOOK);
-
 impl AsRef<str> for DeribitChannel {
     fn as_ref(&self) -> &str {
         self.0
+    }
+}
+
+/// Implement [`Identifier`] for each subscription kind to map to the correct Deribit channel.
+impl<Instrument> Identifier<DeribitChannel>
+    for crate::subscription::Subscription<super::Deribit, Instrument, PublicTrades>
+where
+    Instrument: crate::instrument::InstrumentData,
+{
+    fn id(&self) -> DeribitChannel {
+        DeribitChannel::TRADES
+    }
+}
+
+impl<Instrument> Identifier<DeribitChannel>
+    for crate::subscription::Subscription<super::Deribit, Instrument, OrderBooksL1>
+where
+    Instrument: crate::instrument::InstrumentData,
+{
+    fn id(&self) -> DeribitChannel {
+        DeribitChannel::TICKER
+    }
+}
+
+impl<Instrument> Identifier<DeribitChannel>
+    for crate::subscription::Subscription<super::Deribit, Instrument, OrderBooksL2>
+where
+    Instrument: crate::instrument::InstrumentData,
+{
+    fn id(&self) -> DeribitChannel {
+        DeribitChannel::BOOK
     }
 }
 
