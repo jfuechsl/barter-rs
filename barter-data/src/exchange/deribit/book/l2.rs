@@ -16,7 +16,65 @@ use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
-/// [`Deribit`](super::super::Deribit) real-time OrderBook Level2 (book) message.
+/// Terse type alias for a [`Deribit`](super::super::Deribit) L2 book WebSocket message.
+pub type DeribitBookUpdate = DeribitMessage<DeribitBookUpdateData>;
+
+/// [`Deribit`](super::super::Deribit) market data WebSocket message wrapper for L2.
+///
+/// Deribit wraps all subscription messages in a JSON-RPC 2.0 format with a `params`
+/// field containing the `channel` and `data`.
+#[derive(Clone, PartialEq, Debug, Serialize)]
+pub struct DeribitMessage<T> {
+    pub subscription_id: SubscriptionId,
+    pub data: T,
+}
+
+impl<'de, T> Deserialize<'de> for DeribitMessage<T>
+where
+    T: Deserialize<'de>,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::de::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct Params<T> {
+            channel: String,
+            data: T,
+        }
+
+        #[derive(Deserialize)]
+        struct Wrapper<T> {
+            params: Params<T>,
+        }
+
+        let wrapper = Wrapper::deserialize(deserializer)?;
+        let subscription_id = parse_deribit_channel(&wrapper.params.channel)
+            .map_err(|e| serde::de::Error::custom(e))?;
+        Ok(DeribitMessage {
+            subscription_id,
+            data: wrapper.params.data,
+        })
+    }
+}
+
+/// Parse a Deribit channel string (e.g., "book.BTC-PERPETUAL.100ms") into a
+/// standard Barter subscription ID format (e.g., "book|BTC-PERPETUAL").
+fn parse_deribit_channel(channel: &str) -> Result<SubscriptionId, String> {
+    let parts: Vec<&str> = channel.split('.').collect();
+    if parts.len() < 2 {
+        return Err(format!("Invalid Deribit channel format: {}", channel));
+    }
+    Ok(SubscriptionId::from(format!("{}|{}", parts[0], parts[1])))
+}
+
+impl<T> Identifier<Option<SubscriptionId>> for DeribitMessage<T> {
+    fn id(&self) -> Option<SubscriptionId> {
+        Some(self.subscription_id.clone())
+    }
+}
+
+/// [`Deribit`](super::super::Deribit) real-time OrderBook Level2 (book) data.
 ///
 /// Deribit's book channel provides L2 orderbook data with incremental updates.
 /// The first message is a full snapshot, subsequent messages are deltas.
@@ -72,12 +130,7 @@ use serde::{Deserialize, Serialize};
 /// }
 /// ```
 #[derive(Clone, PartialEq, Debug, Deserialize, Serialize)]
-pub struct DeribitBookUpdate {
-    #[serde(
-        alias = "instrument_name",
-        deserialize_with = "de_book_subscription_id"
-    )]
-    pub subscription_id: SubscriptionId,
+pub struct DeribitBookUpdateData {
     #[serde(
         alias = "timestamp",
         deserialize_with = "barter_integration::de::de_u64_epoch_ms_as_datetime_utc"
@@ -110,24 +163,18 @@ pub enum DeribitBookAction {
     Delete,
 }
 
-impl DeribitBookUpdate {
-    /// Returns `true` if this update is an initial snapshot (no `prev_change_id`).
-    pub fn is_snapshot(&self) -> bool {
-        self.prev_change_id.is_none()
-    }
-}
-
 impl<InstrumentKey> From<(ExchangeId, InstrumentKey, DeribitBookUpdate)>
     for MarketIter<InstrumentKey, OrderBookEvent>
 {
     fn from(
         (exchange, instrument, book_update): (ExchangeId, InstrumentKey, DeribitBookUpdate),
     ) -> Self {
+        let data = book_update.data;
         // Determine if this is a snapshot before consuming fields
-        let is_snapshot = book_update.is_snapshot();
+        let is_snapshot = data.prev_change_id.is_none();
 
         // Convert DeribitBookLevel to Level (handle delete by setting amount to 0)
-        let bid_levels: Vec<Level> = book_update
+        let bid_levels: Vec<Level> = data
             .bids
             .into_iter()
             .map(|level| {
@@ -139,7 +186,7 @@ impl<InstrumentKey> From<(ExchangeId, InstrumentKey, DeribitBookUpdate)>
             })
             .collect();
 
-        let ask_levels: Vec<Level> = book_update
+        let ask_levels: Vec<Level> = data
             .asks
             .into_iter()
             .map(|level| {
@@ -151,12 +198,7 @@ impl<InstrumentKey> From<(ExchangeId, InstrumentKey, DeribitBookUpdate)>
             })
             .collect();
 
-        let orderbook = OrderBook::new(
-            book_update.change_id,
-            Some(book_update.time),
-            bid_levels,
-            ask_levels,
-        );
+        let orderbook = OrderBook::new(data.change_id, Some(data.time), bid_levels, ask_levels);
 
         let kind = if is_snapshot {
             OrderBookEvent::Snapshot(orderbook)
@@ -165,18 +207,12 @@ impl<InstrumentKey> From<(ExchangeId, InstrumentKey, DeribitBookUpdate)>
         };
 
         Self(vec![Ok(MarketEvent {
-            time_exchange: book_update.time,
+            time_exchange: data.time,
             time_received: Utc::now(),
             exchange,
             instrument,
             kind,
         })])
-    }
-}
-
-impl Identifier<Option<SubscriptionId>> for DeribitBookUpdate {
-    fn id(&self) -> Option<SubscriptionId> {
-        Some(self.subscription_id.clone())
     }
 }
 
@@ -245,15 +281,6 @@ fn parse_decimal(value: &serde_json::Value) -> Result<Decimal, Box<dyn std::erro
     }
 }
 
-/// Deserialize a [`DeribitBookUpdate`] "instrument_name" as the associated [`SubscriptionId`].
-fn de_book_subscription_id<'de, D>(deserializer: D) -> Result<SubscriptionId, D::Error>
-where
-    D: serde::de::Deserializer<'de>,
-{
-    <&str as Deserialize>::deserialize(deserializer)
-        .map(|market| SubscriptionId::from(format!("book|{}", market)))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -266,111 +293,149 @@ mod tests {
         fn test_deribit_book_snapshot() {
             let input = r#"
             {
-                "timestamp": 1535098298227,
-                "instrument_name": "BTC-PERPETUAL",
-                "change_id": 123456,
-                "bids": [
-                    ["new", 36289.5, 4600],
-                    ["new", 36288.0, 5000],
-                    ["new", 36287.0, 3000]
-                ],
-                "asks": [
-                    ["new", 36290.0, 53040],
-                    ["new", 36291.0, 10000]
-                ]
+                "jsonrpc": "2.0",
+                "method": "subscription",
+                "params": {
+                    "channel": "book.BTC-PERPETUAL.100ms",
+                    "data": {
+                        "timestamp": 1535098298227,
+                        "instrument_name": "BTC-PERPETUAL",
+                        "change_id": 123456,
+                        "bids": [
+                            ["new", 36289.5, 4600],
+                            ["new", 36288.0, 5000],
+                            ["new", 36287.0, 3000]
+                        ],
+                        "asks": [
+                            ["new", 36290.0, 53040],
+                            ["new", 36291.0, 10000]
+                        ]
+                    }
+                }
             }
             "#;
 
             let actual = serde_json::from_str::<DeribitBookUpdate>(input).unwrap();
 
-            assert_eq!(actual.change_id, 123456);
-            assert_eq!(actual.prev_change_id, None);
-            assert_eq!(actual.bids.len(), 3);
-            assert_eq!(actual.asks.len(), 2);
+            assert_eq!(
+                actual.subscription_id,
+                SubscriptionId::from("book|BTC-PERPETUAL")
+            );
+            assert_eq!(actual.data.change_id, 123456);
+            assert_eq!(actual.data.prev_change_id, None);
+            assert_eq!(actual.data.bids.len(), 3);
+            assert_eq!(actual.data.asks.len(), 2);
 
-            assert!(matches!(actual.bids[0].action, DeribitBookAction::New));
-            assert_eq!(actual.bids[0].price, dec!(36289.5));
-            assert_eq!(actual.bids[0].amount, dec!(4600));
+            assert!(matches!(actual.data.bids[0].action, DeribitBookAction::New));
+            assert_eq!(actual.data.bids[0].price, dec!(36289.5));
+            assert_eq!(actual.data.bids[0].amount, dec!(4600));
 
-            assert!(matches!(actual.asks[0].action, DeribitBookAction::New));
-            assert_eq!(actual.asks[0].price, dec!(36290.0));
-            assert_eq!(actual.asks[0].amount, dec!(53040));
+            assert!(matches!(actual.data.asks[0].action, DeribitBookAction::New));
+            assert_eq!(actual.data.asks[0].price, dec!(36290.0));
+            assert_eq!(actual.data.asks[0].amount, dec!(53040));
         }
 
         #[test]
         fn test_deribit_book_update() {
             let input = r#"
             {
-                "timestamp": 1535098298230,
-                "instrument_name": "BTC-PERPETUAL",
-                "change_id": 123457,
-                "prev_change_id": 123456,
-                "bids": [
-                    ["change", 36289.5, 4700],
-                    ["delete", 36287.0, 0]
-                ],
-                "asks": [
-                    ["new", 36289.8, 1000]
-                ]
+                "jsonrpc": "2.0",
+                "method": "subscription",
+                "params": {
+                    "channel": "book.BTC-PERPETUAL.100ms",
+                    "data": {
+                        "timestamp": 1535098298230,
+                        "instrument_name": "BTC-PERPETUAL",
+                        "change_id": 123457,
+                        "prev_change_id": 123456,
+                        "bids": [
+                            ["change", 36289.5, 4700],
+                            ["delete", 36287.0, 0]
+                        ],
+                        "asks": [
+                            ["new", 36289.8, 1000]
+                        ]
+                    }
+                }
             }
             "#;
 
             let actual = serde_json::from_str::<DeribitBookUpdate>(input).unwrap();
 
-            assert_eq!(actual.change_id, 123457);
-            assert_eq!(actual.prev_change_id, Some(123456));
-            assert_eq!(actual.bids.len(), 2);
-            assert_eq!(actual.asks.len(), 1);
+            assert_eq!(actual.data.change_id, 123457);
+            assert_eq!(actual.data.prev_change_id, Some(123456));
+            assert_eq!(actual.data.bids.len(), 2);
+            assert_eq!(actual.data.asks.len(), 1);
 
-            assert!(matches!(actual.bids[0].action, DeribitBookAction::Change));
-            assert_eq!(actual.bids[0].price, dec!(36289.5));
+            assert!(matches!(
+                actual.data.bids[0].action,
+                DeribitBookAction::Change
+            ));
+            assert_eq!(actual.data.bids[0].price, dec!(36289.5));
 
-            assert!(matches!(actual.bids[1].action, DeribitBookAction::Delete));
-            assert_eq!(actual.bids[1].price, dec!(36287.0));
+            assert!(matches!(
+                actual.data.bids[1].action,
+                DeribitBookAction::Delete
+            ));
+            assert_eq!(actual.data.bids[1].price, dec!(36287.0));
 
-            assert!(matches!(actual.asks[0].action, DeribitBookAction::New));
-            assert_eq!(actual.asks[0].price, dec!(36289.8));
+            assert!(matches!(actual.data.asks[0].action, DeribitBookAction::New));
+            assert_eq!(actual.data.asks[0].price, dec!(36289.8));
         }
 
         #[test]
         fn test_deribit_book_with_string_values() {
             let input = r#"
             {
-                "timestamp": 1535098298227,
-                "instrument_name": "ETH-PERPETUAL",
-                "change_id": 100,
-                "bids": [
-                    ["new", "2000.5", "100.5"],
-                    ["new", "2000.0", "200"]
-                ],
-                "asks": [
-                    ["new", "2001.0", "50.25"]
-                ]
+                "jsonrpc": "2.0",
+                "method": "subscription",
+                "params": {
+                    "channel": "book.ETH-PERPETUAL.100ms",
+                    "data": {
+                        "timestamp": 1535098298227,
+                        "instrument_name": "ETH-PERPETUAL",
+                        "change_id": 100,
+                        "bids": [
+                            ["new", "2000.5", "100.5"],
+                            ["new", "2000.0", "200"]
+                        ],
+                        "asks": [
+                            ["new", "2001.0", "50.25"]
+                        ]
+                    }
+                }
             }
             "#;
 
             let actual = serde_json::from_str::<DeribitBookUpdate>(input).unwrap();
 
-            assert_eq!(actual.bids[0].price, dec!(2000.5));
-            assert_eq!(actual.bids[0].amount, dec!(100.5));
+            assert_eq!(actual.data.bids[0].price, dec!(2000.5));
+            assert_eq!(actual.data.bids[0].amount, dec!(100.5));
         }
 
         #[test]
         fn test_deribit_book_empty() {
             let input = r#"
             {
-                "timestamp": 1535098298227,
-                "instrument_name": "BTC-PERPETUAL",
-                "change_id": 100,
-                "bids": [],
-                "asks": []
+                "jsonrpc": "2.0",
+                "method": "subscription",
+                "params": {
+                    "channel": "book.BTC-PERPETUAL.100ms",
+                    "data": {
+                        "timestamp": 1535098298227,
+                        "instrument_name": "BTC-PERPETUAL",
+                        "change_id": 100,
+                        "bids": [],
+                        "asks": []
+                    }
+                }
             }
             "#;
 
             let actual = serde_json::from_str::<DeribitBookUpdate>(input).unwrap();
 
-            assert!(actual.bids.is_empty());
-            assert!(actual.asks.is_empty());
+            assert!(actual.data.bids.is_empty());
+            assert!(actual.data.asks.is_empty());
         }
     }
 
@@ -379,26 +444,28 @@ mod tests {
         let time = Utc::now();
         let book_update = DeribitBookUpdate {
             subscription_id: SubscriptionId::from("book|BTC-PERPETUAL"),
-            time,
-            change_id: 123457,
-            prev_change_id: Some(123456),
-            bids: vec![
-                DeribitBookLevel {
-                    action: DeribitBookAction::Change,
-                    price: dec!(36289.5),
-                    amount: dec!(4700),
-                },
-                DeribitBookLevel {
-                    action: DeribitBookAction::Delete,
-                    price: dec!(36288.0),
-                    amount: Decimal::ZERO,
-                },
-            ],
-            asks: vec![DeribitBookLevel {
-                action: DeribitBookAction::New,
-                price: dec!(36290.5),
-                amount: dec!(1000),
-            }],
+            data: DeribitBookUpdateData {
+                time,
+                change_id: 123457,
+                prev_change_id: Some(123456),
+                bids: vec![
+                    DeribitBookLevel {
+                        action: DeribitBookAction::Change,
+                        price: dec!(36289.5),
+                        amount: dec!(4700),
+                    },
+                    DeribitBookLevel {
+                        action: DeribitBookAction::Delete,
+                        price: dec!(36288.0),
+                        amount: Decimal::ZERO,
+                    },
+                ],
+                asks: vec![DeribitBookLevel {
+                    action: DeribitBookAction::New,
+                    price: dec!(36290.5),
+                    amount: dec!(1000),
+                }],
+            },
         };
 
         let market_iter: MarketIter<String, OrderBookEvent> = (
@@ -425,19 +492,21 @@ mod tests {
         let time = Utc::now();
         let book_update = DeribitBookUpdate {
             subscription_id: SubscriptionId::from("book|BTC-PERPETUAL"),
-            time,
-            change_id: 123456,
-            prev_change_id: None, // No prev_change_id means snapshot
-            bids: vec![DeribitBookLevel {
-                action: DeribitBookAction::New,
-                price: dec!(36289.5),
-                amount: dec!(4600),
-            }],
-            asks: vec![DeribitBookLevel {
-                action: DeribitBookAction::New,
-                price: dec!(36290.5),
-                amount: dec!(53040),
-            }],
+            data: DeribitBookUpdateData {
+                time,
+                change_id: 123456,
+                prev_change_id: None, // No prev_change_id means snapshot
+                bids: vec![DeribitBookLevel {
+                    action: DeribitBookAction::New,
+                    price: dec!(36289.5),
+                    amount: dec!(4600),
+                }],
+                asks: vec![DeribitBookLevel {
+                    action: DeribitBookAction::New,
+                    price: dec!(36290.5),
+                    amount: dec!(53040),
+                }],
+            },
         };
 
         let market_iter: MarketIter<String, OrderBookEvent> = (
@@ -463,15 +532,17 @@ mod tests {
         let time = Utc::now();
         let book_update = DeribitBookUpdate {
             subscription_id: SubscriptionId::from("book|BTC-PERPETUAL"),
-            time,
-            change_id: 123457,
-            prev_change_id: Some(123456),
-            bids: vec![DeribitBookLevel {
-                action: DeribitBookAction::Delete,
-                price: dec!(36288.0),
-                amount: dec!(5000), // Non-zero amount in message
-            }],
-            asks: vec![],
+            data: DeribitBookUpdateData {
+                time,
+                change_id: 123457,
+                prev_change_id: Some(123456),
+                bids: vec![DeribitBookLevel {
+                    action: DeribitBookAction::Delete,
+                    price: dec!(36288.0),
+                    amount: dec!(5000), // Non-zero amount in message
+                }],
+                asks: vec![],
+            },
         };
 
         let market_iter: MarketIter<String, OrderBookEvent> = (
@@ -510,36 +581,36 @@ mod tests {
 
     #[test]
     fn test_is_snapshot() {
-        let snapshot = DeribitBookUpdate {
-            subscription_id: SubscriptionId::from("book|BTC-PERPETUAL"),
+        let snapshot = DeribitBookUpdateData {
             time: Utc::now(),
             change_id: 123456,
             prev_change_id: None,
             bids: vec![],
             asks: vec![],
         };
-        assert!(snapshot.is_snapshot());
+        assert!(snapshot.prev_change_id.is_none());
 
-        let update = DeribitBookUpdate {
-            subscription_id: SubscriptionId::from("book|BTC-PERPETUAL"),
+        let update = DeribitBookUpdateData {
             time: Utc::now(),
             change_id: 123457,
             prev_change_id: Some(123456),
             bids: vec![],
             asks: vec![],
         };
-        assert!(!update.is_snapshot());
+        assert!(update.prev_change_id.is_some());
     }
 
     #[test]
     fn test_identifier() {
         let update = DeribitBookUpdate {
             subscription_id: SubscriptionId::from("book|BTC-PERPETUAL"),
-            time: Utc::now(),
-            change_id: 123456,
-            prev_change_id: None,
-            bids: vec![],
-            asks: vec![],
+            data: DeribitBookUpdateData {
+                time: Utc::now(),
+                change_id: 123456,
+                prev_change_id: None,
+                bids: vec![],
+                asks: vec![],
+            },
         };
 
         let id = update.id();
