@@ -81,8 +81,6 @@ fn init_logging() {
         )
         // Disable colours on release builds
         .with_ansi(cfg!(debug_assertions))
-        // Enable Json formatting
-        .json()
         // Install this Tracing subscriber as global default
         .init()
 }
