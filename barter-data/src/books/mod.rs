@@ -115,12 +115,12 @@ impl OrderBook {
     /// Calculate the volume weighted mid-price (micro-price), weighing the best bid and ask prices
     /// with their associated amount.
     ///
+    /// Returns `None` if there are no bids or asks, or if the total volume is zero.
+    ///
     /// See Docs: <https://www.quantstart.com/articles/high-frequency-trading-ii-limit-order-book>
     pub fn volume_weighed_mid_price(&self) -> Option<Decimal> {
         match (self.bids.best(), self.asks.best()) {
-            (Some(best_bid), Some(best_ask)) => {
-                Some(volume_weighted_mid_price(*best_bid, *best_ask))
-            }
+            (Some(best_bid), Some(best_ask)) => volume_weighted_mid_price(*best_bid, *best_ask),
             (Some(best_bid), None) => Some(best_bid.price),
             (None, Some(best_ask)) => Some(best_ask.price),
             (None, None) => None,
@@ -309,10 +309,15 @@ pub fn mid_price(best_bid_price: Decimal, best_ask_price: Decimal) -> Decimal {
 /// Calculate the volume weighted mid-price (micro-price), weighing the best bid and ask prices
 /// with their associated amount.
 ///
+/// Returns `None` if the total volume (bid amount + ask amount) is zero.
+///
 /// See Docs: <https://www.quantstart.com/articles/high-frequency-trading-ii-limit-order-book>
-pub fn volume_weighted_mid_price(best_bid: Level, best_ask: Level) -> Decimal {
-    ((best_bid.price * best_ask.amount) + (best_ask.price * best_bid.amount))
-        / (best_bid.amount + best_ask.amount)
+pub fn volume_weighted_mid_price(best_bid: Level, best_ask: Level) -> Option<Decimal> {
+    let total_volume = best_bid.amount + best_ask.amount;
+    if total_volume.is_zero() {
+        return None;
+    }
+    Some(((best_bid.price * best_ask.amount) + (best_ask.price * best_bid.amount)) / total_volume)
 }
 
 #[cfg(test)]

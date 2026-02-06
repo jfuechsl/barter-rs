@@ -279,7 +279,7 @@ pub fn exchange_supports_instrument_kind_sub_kind(
         (Okx, Spot | Future { .. } | Perpetual | Option { .. }, PublicTrades) => true,
         (
             Deribit,
-            Perpetual | Future { .. } | Option { .. },
+            Spot | Perpetual | Future { .. } | Option { .. },
             PublicTrades | OrderBooksL1 | OrderBooksL2,
         ) => true,
 

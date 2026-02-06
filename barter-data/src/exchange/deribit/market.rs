@@ -30,16 +30,12 @@ impl AsRef<str> for DeribitMarket {
 }
 
 fn deribit_market(instrument: &MarketDataInstrument) -> DeribitMarket {
-    let MarketDataInstrument {
-        base,
-        quote: _,
-        kind,
-    } = instrument;
+    let MarketDataInstrument { base, quote, kind } = instrument;
 
     DeribitMarket(match kind {
         Spot => {
-            // Deribit doesn't have spot markets, but we can map to perpetual
-            format_smolstr!("{base}-PERPETUAL").to_uppercase_smolstr()
+            // Deribit spot markets use format: BTC_USDC, ETH_USDT, ETH_BTC
+            format_smolstr!("{base}_{quote}").to_uppercase_smolstr()
         }
         Future(contract) => {
             format_smolstr!("{base}-{}", format_expiry(contract.expiry)).to_uppercase_smolstr()
@@ -138,10 +134,24 @@ mod tests {
     }
 
     #[test]
-    fn test_deribit_market_spot_fallback() {
-        // Deribit doesn't have spot, so we map to perpetual
-        let instrument = test_instrument("btc", "usd", Spot);
+    fn test_deribit_market_spot() {
+        // Spot markets should use {BASE}_{QUOTE} format
+        let instrument = test_instrument("btc", "usdc", Spot);
         let market = deribit_market(&instrument);
-        assert_eq!(market.as_ref(), "BTC-PERPETUAL");
+        assert_eq!(market.as_ref(), "BTC_USDC");
+    }
+
+    #[test]
+    fn test_deribit_market_spot_eth_btc() {
+        let instrument = test_instrument("eth", "btc", Spot);
+        let market = deribit_market(&instrument);
+        assert_eq!(market.as_ref(), "ETH_BTC");
+    }
+
+    #[test]
+    fn test_deribit_market_spot_eth_usdt() {
+        let instrument = test_instrument("eth", "usdt", Spot);
+        let market = deribit_market(&instrument);
+        assert_eq!(market.as_ref(), "ETH_USDT");
     }
 }

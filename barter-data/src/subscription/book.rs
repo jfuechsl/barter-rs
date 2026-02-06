@@ -56,10 +56,12 @@ impl OrderBookL1 {
     /// Calculate the volume weighted mid-price (micro-price), weighing the best bid and ask prices
     /// with their associated amount.
     ///
+    /// Returns `None` if either bid or ask is missing, or if the total volume is zero.
+    ///
     /// See Docs: <https://www.quantstart.com/articles/high-frequency-trading-ii-limit-order-book>
     pub fn volume_weighed_mid_price(&self) -> Option<Decimal> {
         match (self.best_ask, self.best_bid) {
-            (Some(best_ask), Some(best_bid)) => Some(volume_weighted_mid_price(best_bid, best_ask)),
+            (Some(best_ask), Some(best_bid)) => volume_weighted_mid_price(best_bid, best_ask),
             _ => None,
         }
     }
