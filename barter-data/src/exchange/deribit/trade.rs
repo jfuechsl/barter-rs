@@ -1,105 +1,17 @@
 use crate::{
-    Identifier,
     event::{MarketEvent, MarketIter},
     subscription::trade::PublicTrade,
 };
 use barter_instrument::{Side, exchange::ExchangeId};
-use barter_integration::subscription::SubscriptionId;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 /// Terse type alias for a [`Deribit`](super::Deribit) real-time trades WebSocket message.
-pub type DeribitTrades = DeribitMessage<DeribitTrade>;
-
-/// [`Deribit`](super::Deribit) market data WebSocket message wrapper.
-///
-/// Deribit wraps all subscription messages in a JSON-RPC 2.0 format with a `params`
-/// field containing the `channel` and `data`.
-///
-/// ### Raw Payload Examples
-/// See docs: <https://docs.deribit.com/subscriptions/trades>
-/// #### Perpetual Trade
-/// ```json
-/// {
-///   "jsonrpc": "2.0",
-///   "method": "subscription",
-///   "params": {
-///     "channel": "trades.BTC-PERPETUAL.raw",
-///     "data": [
-///       {
-///         "trade_seq": 2,
-///         "trade_id": "48079289",
-///         "timestamp": 1590484589306,
-///         "tick_direction": 2,
-///         "price": 36289.5,
-///         "mark_price": 36288.31,
-///         "instrument_name": "BTC-PERPETUAL",
-///         "index_price": 36297.02,
-///         "direction": "sell",
-///         "amount": 10.5
-///       }
-///     ]
-///   }
-/// }
-/// ```
-#[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Serialize)]
-pub struct DeribitMessage<T> {
-    pub subscription_id: SubscriptionId,
-    pub data: Vec<T>,
-}
-
-impl<'de, T> Deserialize<'de> for DeribitMessage<T>
-where
-    T: Deserialize<'de>,
-{
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::de::Deserializer<'de>,
-    {
-        #[derive(Deserialize)]
-        struct Params<T> {
-            channel: String,
-            data: Vec<T>,
-        }
-
-        #[derive(Deserialize)]
-        struct Wrapper<T> {
-            params: Params<T>,
-        }
-
-        let wrapper = Wrapper::deserialize(deserializer)?;
-        let subscription_id = parse_deribit_channel(&wrapper.params.channel)
-            .map_err(|e| serde::de::Error::custom(e))?;
-        Ok(DeribitMessage {
-            subscription_id,
-            data: wrapper.params.data,
-        })
-    }
-}
-
-/// Parse a Deribit channel string (e.g., "trades.BTC-PERPETUAL.100ms") into a
-/// standard Barter subscription ID format (e.g., "trades|BTC-PERPETUAL").
-fn parse_deribit_channel(channel: &str) -> Result<SubscriptionId, String> {
-    // Deribit channel format: {channel}.{market}.{interval}
-    // Example: "trades.BTC-PERPETUAL.100ms"
-    let parts: Vec<&str> = channel.split('.').collect();
-    if parts.len() < 2 {
-        return Err(format!("Invalid Deribit channel format: {}", channel));
-    }
-
-    // Create subscription ID in standard format: {channel}|{market}
-    Ok(SubscriptionId::from(format!("{}|{}", parts[0], parts[1])))
-}
-
-impl<T> Identifier<Option<SubscriptionId>> for DeribitMessage<T> {
-    fn id(&self) -> Option<SubscriptionId> {
-        Some(self.subscription_id.clone())
-    }
-}
+pub type DeribitTrades = super::message::DeribitMessage<Vec<DeribitTrade>>;
 
 /// [`Deribit`](super::Deribit) real-time trade WebSocket message.
 ///
-/// See [`DeribitMessage`] for full raw payload examples.
+/// See [`DeribitTrades`] for full raw payload examples.
 ///
 /// See docs: <https://docs.deribit.com/subscriptions/trades>
 #[derive(Clone, PartialEq, PartialOrd, Debug, Deserialize, Serialize)]
@@ -161,12 +73,14 @@ impl<InstrumentKey: Clone> From<(ExchangeId, InstrumentKey, DeribitTrades)>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use barter_integration::de::datetime_utc_from_epoch_duration;
+    use crate::exchange::deribit::message::DeribitMessage;
+    use barter_integration::{de::datetime_utc_from_epoch_duration, subscription::SubscriptionId};
     use std::time::Duration;
 
     mod de {
         use super::*;
-        use barter_integration::error::SocketError;
+        use crate::exchange::deribit::message::DeribitMessage;
+        use barter_integration::{error::SocketError, subscription::SubscriptionId};
 
         #[test]
         fn test_deribit_message_trades() {
@@ -198,7 +112,7 @@ mod tests {
             let expected_time =
                 datetime_utc_from_epoch_duration(Duration::from_millis(1590484589306));
 
-            let expected: Result<DeribitTrades, SocketError> = Ok(DeribitTrades {
+            let expected: Result<DeribitTrades, SocketError> = Ok(DeribitMessage {
                 subscription_id: SubscriptionId::from("trades|BTC-PERPETUAL"),
                 data: vec![DeribitTrade {
                     id: "48079289".to_string(),
@@ -323,7 +237,7 @@ mod tests {
         use barter_instrument::exchange::ExchangeId;
 
         let time = Utc::now();
-        let trades = DeribitTrades {
+        let trades = DeribitMessage {
             subscription_id: SubscriptionId::from("trades.BTC-PERPETUAL.raw"),
             data: vec![DeribitTrade {
                 id: "12345".to_string(),

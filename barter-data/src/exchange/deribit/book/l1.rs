@@ -1,72 +1,15 @@
 use crate::{
-    Identifier,
     books::Level,
     event::{MarketEvent, MarketIter},
     subscription::book::OrderBookL1,
 };
 use barter_instrument::exchange::ExchangeId;
-use barter_integration::subscription::SubscriptionId;
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
 /// Terse type alias for a [`Deribit`](super::super::Deribit) L1 ticker WebSocket message.
-pub type DeribitTicker = DeribitMessage<DeribitTickerData>;
-
-/// [`Deribit`](super::super::Deribit) market data WebSocket message wrapper for L1.
-///
-/// Deribit wraps all subscription messages in a JSON-RPC 2.0 format with a `params`
-/// field containing the `channel` and `data`.
-#[derive(Clone, PartialEq, PartialOrd, Debug, Serialize)]
-pub struct DeribitMessage<T> {
-    pub subscription_id: SubscriptionId,
-    pub data: T,
-}
-
-impl<'de, T> Deserialize<'de> for DeribitMessage<T>
-where
-    T: Deserialize<'de>,
-{
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::de::Deserializer<'de>,
-    {
-        #[derive(Deserialize)]
-        struct Params<T> {
-            channel: String,
-            data: T,
-        }
-
-        #[derive(Deserialize)]
-        struct Wrapper<T> {
-            params: Params<T>,
-        }
-
-        let wrapper = Wrapper::deserialize(deserializer)?;
-        let subscription_id = parse_deribit_channel(&wrapper.params.channel)
-            .map_err(|e| serde::de::Error::custom(e))?;
-        Ok(DeribitMessage {
-            subscription_id,
-            data: wrapper.params.data,
-        })
-    }
-}
-
-/// Parse a Deribit channel string (e.g., "ticker.BTC-PERPETUAL.100ms") into a
-/// standard Barter subscription ID format (e.g., "ticker|BTC-PERPETUAL").
-fn parse_deribit_channel(channel: &str) -> Result<SubscriptionId, String> {
-    let parts: Vec<&str> = channel.split('.').collect();
-    if parts.len() < 2 {
-        return Err(format!("Invalid Deribit channel format: {}", channel));
-    }
-    Ok(SubscriptionId::from(format!("{}|{}", parts[0], parts[1])))
-}
-
-impl<T> Identifier<Option<SubscriptionId>> for DeribitMessage<T> {
-    fn id(&self) -> Option<SubscriptionId> {
-        Some(self.subscription_id.clone())
-    }
-}
+pub type DeribitTicker = super::super::message::DeribitMessage<DeribitTickerData>;
 
 /// [`Deribit`](super::super::Deribit) real-time OrderBook Level1 (ticker) data.
 ///
@@ -141,10 +84,14 @@ impl<InstrumentKey> From<(ExchangeId, InstrumentKey, DeribitTicker)>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::exchange::deribit::message::DeribitMessage;
+    use barter_integration::subscription::SubscriptionId;
     use rust_decimal_macros::dec;
 
     mod de {
         use super::*;
+        use crate::exchange::deribit::message::DeribitMessage;
+        use barter_integration::subscription::SubscriptionId;
 
         #[test]
         fn test_deribit_ticker_l1() {
@@ -177,7 +124,7 @@ mod tests {
                         }
                     }
                     "#,
-                    expected: DeribitTicker {
+                    expected: DeribitMessage {
                         subscription_id: SubscriptionId::from("ticker|BTC-PERPETUAL"),
                         data: DeribitTickerData {
                             time,
@@ -209,7 +156,7 @@ mod tests {
                         }
                     }
                     "#,
-                    expected: DeribitTicker {
+                    expected: DeribitMessage {
                         subscription_id: SubscriptionId::from("ticker|ETH-PERPETUAL"),
                         data: DeribitTickerData {
                             time,
@@ -224,7 +171,7 @@ mod tests {
 
             for (index, test) in tests.into_iter().enumerate() {
                 let actual = serde_json::from_str::<DeribitTicker>(test.input).unwrap();
-                let actual = DeribitTicker {
+                let actual = DeribitMessage {
                     subscription_id: actual.subscription_id,
                     data: DeribitTickerData {
                         time,
@@ -295,7 +242,7 @@ mod tests {
         use barter_instrument::exchange::ExchangeId;
 
         let time = Utc::now();
-        let ticker = DeribitTicker {
+        let ticker = DeribitMessage {
             subscription_id: SubscriptionId::from("ticker|BTC-PERPETUAL"),
             data: DeribitTickerData {
                 time,
@@ -328,7 +275,7 @@ mod tests {
         use barter_instrument::exchange::ExchangeId;
 
         let time = Utc::now();
-        let ticker = DeribitTicker {
+        let ticker = DeribitMessage {
             subscription_id: SubscriptionId::from("ticker|BTC-PERPETUAL"),
             data: DeribitTickerData {
                 time,

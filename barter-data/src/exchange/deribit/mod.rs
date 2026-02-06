@@ -1,6 +1,6 @@
 use self::{
-    channel::DeribitChannel, market::DeribitMarket, subscription::DeribitSubResponse,
-    trade::DeribitTrades,
+    channel::DeribitChannel, market::DeribitMarket, message::DeribitParser,
+    subscription::DeribitSubResponse, trade::DeribitTrades,
 };
 use crate::{
     ExchangeWsStream, NoInitialSnapshots,
@@ -14,10 +14,7 @@ use crate::{
     transformer::stateless::StatelessTransformer,
 };
 use barter_instrument::exchange::ExchangeId;
-use barter_integration::{
-    error::SocketError,
-    protocol::websocket::{WebSocketSerdeParser, WsMessage},
-};
+use barter_integration::{error::SocketError, protocol::websocket::WsMessage};
 use barter_macro::{DeExchange, SerExchange, StreamConnectorMeta};
 use derive_more::Display;
 use serde_json::json;
@@ -42,6 +39,9 @@ pub mod trade;
 /// OrderBook types for [`Deribit`].
 pub mod book;
 
+/// WebSocket message types and parser for [`Deribit`].
+pub mod message;
+
 /// [`Deribit`] server base url.
 ///
 /// See docs: <https://docs.deribit.com/api-reference/websocket>
@@ -53,8 +53,8 @@ pub const BASE_URL_DERIBIT: &str = "wss://www.deribit.com/ws/api/v2/";
 /// See docs: <https://docs.deribit.com/api-reference/websocket>
 pub const PING_INTERVAL_DERIBIT: Duration = Duration::from_secs(30);
 
-/// Convenient type alias for a Deribit [`ExchangeWsStream`] using [`WebSocketSerdeParser`].
-pub type DeribitWsStream<Transformer> = ExchangeWsStream<WebSocketSerdeParser, Transformer>;
+/// Convenient type alias for a Deribit [`ExchangeWsStream`] using [`DeribitParser`].
+pub type DeribitWsStream<Transformer> = ExchangeWsStream<DeribitParser, Transformer>;
 
 /// [`Deribit`] exchange.
 ///
