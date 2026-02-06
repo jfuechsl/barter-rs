@@ -90,8 +90,6 @@ mod tests {
 
     mod de {
         use super::*;
-        use crate::exchange::deribit::message::DeribitMessage;
-        use barter_integration::subscription::SubscriptionId;
 
         #[test]
         fn test_deribit_ticker_l1() {
