@@ -134,10 +134,11 @@ where
         map.0.len()
     }
 
-    /// Returns Deribit credentials if this exchange supports authentication.
+    /// Returns exchange-specific API credentials for authentication, if available.
     ///
-    /// Defaults to `None` - only Deribit implements this to return actual credentials.
-    fn deribit_credentials(&self) -> Option<crate::exchange::deribit::DeribitCredentials> {
+    /// Defaults to `None`. Override for exchanges that require authentication
+    /// (e.g., Deribit raw feeds).
+    fn credentials(&self) -> Option<crate::exchange::deribit::DeribitCredentials> {
         None
     }
 

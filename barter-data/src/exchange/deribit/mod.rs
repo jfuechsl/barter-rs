@@ -251,7 +251,7 @@ impl Connector for Deribit {
         )]
     }
 
-    fn deribit_credentials(&self) -> Option<DeribitCredentials> {
+    fn credentials(&self) -> Option<DeribitCredentials> {
         self.credentials.clone()
     }
 }
@@ -315,7 +315,7 @@ impl Subscriber for DeribitSubscriber {
         if let Some(first_sub) = subscriptions.first() {
             // Extract credentials from the exchange instance using Connector trait method
             // This avoids the inefficient serde_json serialization roundtrip
-            let maybe_creds = first_sub.exchange.deribit_credentials();
+            let maybe_creds = first_sub.exchange.credentials();
 
             if let Some(creds) = maybe_creds {
                 debug!(%exchange, "authenticating with Deribit");
