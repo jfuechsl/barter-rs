@@ -39,10 +39,8 @@ impl AsRef<str> for DeribitInterval {
 /// See docs: <https://docs.deribit.com/subscriptions>
 #[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Deserialize, Serialize)]
 pub struct DeribitChannel {
-    pub base: &'static str,
+    base: &'static str,
     interval: DeribitInterval,
-    /// The full channel string (e.g., "trades.100ms").
-    full: String,
 }
 
 impl DeribitChannel {
@@ -53,7 +51,6 @@ impl DeribitChannel {
         Self {
             base: "trades",
             interval,
-            full: format!("trades.{}", interval.as_ref()),
         }
     }
 
@@ -64,7 +61,6 @@ impl DeribitChannel {
         Self {
             base: "ticker",
             interval,
-            full: format!("ticker.{}", interval.as_ref()),
         }
     }
 
@@ -75,7 +71,6 @@ impl DeribitChannel {
         Self {
             base: "book",
             interval,
-            full: format!("book.{}", interval.as_ref()),
         }
     }
 
@@ -107,7 +102,7 @@ impl DeribitChannel {
 
 impl AsRef<str> for DeribitChannel {
     fn as_ref(&self) -> &str {
-        &self.full
+        self.base
     }
 }
 
@@ -150,19 +145,18 @@ mod tests {
 
     #[test]
     fn test_deribit_channel_as_ref() {
-        assert_eq!(DeribitChannel::trades_100ms().as_ref(), "trades.100ms");
-        assert_eq!(DeribitChannel::ticker_100ms().as_ref(), "ticker.100ms");
-        assert_eq!(DeribitChannel::book_100ms().as_ref(), "book.100ms");
+        // as_ref() should return only the base channel name, not the full string.
+        // The full string (e.g., "trades.100ms") is built in Connector::requests().
+        assert_eq!(DeribitChannel::trades_100ms().as_ref(), "trades");
+        assert_eq!(DeribitChannel::ticker_100ms().as_ref(), "ticker");
+        assert_eq!(DeribitChannel::book_100ms().as_ref(), "book");
     }
 
     #[test]
     fn test_deribit_channel_serialize() {
         let channel = DeribitChannel::trades_100ms();
         let json = serde_json::to_string(&channel).unwrap();
-        assert_eq!(
-            json,
-            r#"{"base":"trades","interval":"HundredMs","full":"trades.100ms"}"#
-        );
+        assert_eq!(json, r#"{"base":"trades","interval":"HundredMs"}"#);
     }
 
     #[test]
@@ -176,15 +170,49 @@ mod tests {
     fn test_deribit_channel_interval() {
         let channel = DeribitChannel::trades(DeribitInterval::Raw);
         assert_eq!(channel.interval(), DeribitInterval::Raw);
-        assert_eq!(channel.as_ref(), "trades.raw");
+        assert_eq!(channel.as_ref(), "trades");
 
         let channel = DeribitChannel::book(DeribitInterval::HundredMs);
         assert_eq!(channel.interval(), DeribitInterval::HundredMs);
-        assert_eq!(channel.as_ref(), "book.100ms");
+        assert_eq!(channel.as_ref(), "book");
     }
 
     #[test]
     fn test_default_interval() {
         assert_eq!(DeribitInterval::default(), DeribitInterval::HundredMs);
+    }
+
+    #[test]
+    fn test_subscription_id_matches_parse_deribit_channel() {
+        use crate::Identifier;
+        use crate::exchange::ExchangeSub;
+        use crate::exchange::deribit::market::DeribitMarket;
+        use crate::exchange::deribit::message::parse_deribit_channel;
+        use barter_integration::subscription::SubscriptionId;
+
+        // Simulate the ExchangeSub ID that the subscriber creates
+        let exchange_sub = ExchangeSub {
+            channel: DeribitChannel::trades(DeribitInterval::HundredMs),
+            market: DeribitMarket("BTC-PERPETUAL".into()),
+        };
+        let sub_id: SubscriptionId = exchange_sub.id();
+
+        // Simulate what parse_deribit_channel produces from an incoming message
+        let parsed_id = parse_deribit_channel("trades.BTC-PERPETUAL.100ms").unwrap();
+
+        // These MUST match for the subscription map lookup to work
+        assert_eq!(
+            sub_id, parsed_id,
+            "ExchangeSub ID must match parsed channel ID"
+        );
+
+        // Also test with raw interval
+        let exchange_sub_raw = ExchangeSub {
+            channel: DeribitChannel::book(DeribitInterval::Raw),
+            market: DeribitMarket("ETH-PERPETUAL".into()),
+        };
+        let sub_id_raw: SubscriptionId = exchange_sub_raw.id();
+        let parsed_id_raw = parse_deribit_channel("book.ETH-PERPETUAL.raw").unwrap();
+        assert_eq!(sub_id_raw, parsed_id_raw);
     }
 }
