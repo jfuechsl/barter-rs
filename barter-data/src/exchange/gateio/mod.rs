@@ -2,7 +2,7 @@ use self::{channel::GateioChannel, market::GateioMarket, subscription::GateioSub
 use crate::{
     ExchangeWsStream,
     exchange::{Connector, ExchangeServer, subscription::ExchangeSub},
-    subscriber::{NoAuth, WebSocketSubscriber, validator::WebSocketSubValidator},
+    subscriber::{WebSocketSubscriber, validator::WebSocketSubValidator},
 };
 use barter_instrument::exchange::ExchangeId;
 use barter_integration::{
@@ -74,7 +74,6 @@ where
     type Subscriber = WebSocketSubscriber;
     type SubValidator = WebSocketSubValidator;
     type SubResponse = GateioSubResponse;
-    type Auth = NoAuth;
 
     fn url() -> Result<Url, SocketError> {
         Url::parse(Server::websocket_url()).map_err(SocketError::UrlParse)

@@ -6,7 +6,7 @@ use crate::{
     ExchangeWsStream, NoInitialSnapshots,
     exchange::{Connector, ExchangeServer, ExchangeSub, StreamSelector},
     instrument::InstrumentData,
-    subscriber::{NoAuth, WebSocketSubscriber, validator::WebSocketSubValidator},
+    subscriber::{WebSocketSubscriber, validator::WebSocketSubValidator},
     subscription::{Map, book::OrderBooksL1, trade::PublicTrades},
     transformer::stateless::StatelessTransformer,
 };
@@ -70,7 +70,6 @@ where
     type Subscriber = WebSocketSubscriber;
     type SubValidator = WebSocketSubValidator;
     type SubResponse = BinanceSubResponse;
-    type Auth = NoAuth;
 
     fn url() -> Result<Url, SocketError> {
         Url::parse(Server::websocket_url()).map_err(SocketError::UrlParse)

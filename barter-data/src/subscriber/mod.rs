@@ -17,38 +17,6 @@ use serde::{Deserialize, Serialize};
 use std::{fmt::Debug, future::Future};
 use tracing::debug;
 
-/// Handles optional WebSocket authentication before subscribing to market data streams.
-///
-/// Implement this trait for exchanges that require authentication (e.g., for raw feeds).
-/// Use [`NoAuth`] for exchanges that don't require any authentication.
-pub trait Authenticator: Send + Sync {
-    /// Credentials type required for authentication.
-    type Credentials: Clone + Send + Sync;
-
-    /// Authenticate on the WebSocket using the provided credentials.
-    fn authenticate(
-        credentials: &Self::Credentials,
-        websocket: &mut WebSocket,
-    ) -> impl Future<Output = Result<(), SocketError>> + Send;
-}
-
-/// No-op [`Authenticator`] for exchanges that don't require authentication.
-///
-/// Uses `()` as the credentials type and performs no authentication.
-#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Deserialize, Serialize)]
-pub struct NoAuth;
-
-impl Authenticator for NoAuth {
-    type Credentials = ();
-
-    async fn authenticate(
-        _credentials: &(),
-        _websocket: &mut WebSocket,
-    ) -> Result<(), SocketError> {
-        Ok(())
-    }
-}
-
 /// [`SubscriptionMapper`] implementations defining how to map a
 /// collection of Barter [`Subscription`]s into exchange specific [`SubscriptionMeta`].
 pub mod mapper;
@@ -105,13 +73,9 @@ impl Subscriber for WebSocketSubscriber {
         let mut websocket = connect(url).await?;
         debug!(%exchange, ?subscriptions, "connected to WebSocket");
 
-        // Authenticate if credentials are present
+        // Authenticate if required by the exchange
         if let Some(first_sub) = subscriptions.first() {
-            if let Some(credentials) = first_sub.exchange.credentials() {
-                debug!(%exchange, "authenticating with exchange");
-                Exchange::Auth::authenticate(&credentials, &mut websocket).await?;
-                debug!(%exchange, "authentication successful");
-            }
+            first_sub.exchange.authenticate(&mut websocket).await?;
         }
 
         // Map &[Subscription<Exchange, Kind>] to SubscriptionMeta

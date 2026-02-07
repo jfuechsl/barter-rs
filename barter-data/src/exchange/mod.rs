@@ -2,13 +2,17 @@ use self::subscription::ExchangeSub;
 use crate::{
     MarketStream, SnapshotFetcher,
     instrument::InstrumentData,
-    subscriber::{Authenticator, Subscriber, validator::SubscriptionValidator},
+    subscriber::{Subscriber, validator::SubscriptionValidator},
     subscription::{Map, SubscriptionKind},
 };
 use barter_instrument::exchange::ExchangeId;
-use barter_integration::{Validator, error::SocketError, protocol::websocket::WsMessage};
+use barter_integration::{
+    Validator,
+    error::SocketError,
+    protocol::websocket::{WebSocket, WsMessage},
+};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use std::{fmt::Debug, time::Duration};
+use std::{fmt::Debug, future::Future, time::Duration};
 use url::Url;
 
 /// `BinanceSpot` & `BinanceFuturesUsd` [`Connector`] and [`StreamSelector`] implementations.
@@ -111,11 +115,6 @@ where
     /// communicates a successful `Subscription` outcome.
     type SubResponse: Validator + Debug + DeserializeOwned;
 
-    /// [`Authenticator`] type that handles optional WebSocket authentication before subscribing.
-    ///
-    /// Use [`NoAuth`](crate::subscriber::NoAuth) for exchanges that don't require authentication.
-    type Auth: Authenticator;
-
     /// Base [`Url`] of the exchange server being connected with.
     fn url() -> Result<Url, SocketError>;
 
@@ -139,12 +138,15 @@ where
         map.0.len()
     }
 
-    /// Returns exchange-specific API credentials for authentication, if available.
+    /// Optionally authenticate on the WebSocket before subscribing to market data streams.
     ///
-    /// Defaults to `None`. Override for exchanges that require authentication
+    /// Defaults to no-op. Override for exchanges that require authentication
     /// (e.g., Deribit raw feeds).
-    fn credentials(&self) -> Option<<Self::Auth as Authenticator>::Credentials> {
-        None
+    fn authenticate(
+        &self,
+        _websocket: &mut WebSocket,
+    ) -> impl Future<Output = Result<(), SocketError>> + Send {
+        async { Ok(()) }
     }
 
     /// Expected [`Duration`] the [`SubscriptionValidator`] will wait to receive all success

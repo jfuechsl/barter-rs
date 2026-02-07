@@ -27,7 +27,7 @@ use crate::{
     ExchangeWsStream, NoInitialSnapshots,
     exchange::{Connector, ExchangeSub, StreamSelector},
     instrument::InstrumentData,
-    subscriber::{NoAuth, WebSocketSubscriber},
+    subscriber::WebSocketSubscriber,
     subscription::trade::PublicTrades,
     transformer::stateless::StatelessTransformer,
 };
@@ -98,7 +98,6 @@ impl Connector for Bitfinex {
     type Subscriber = WebSocketSubscriber;
     type SubValidator = BitfinexWebSocketSubValidator;
     type SubResponse = BitfinexPlatformEvent;
-    type Auth = NoAuth;
 
     fn url() -> Result<Url, SocketError> {
         Url::parse(BASE_URL_BITFINEX).map_err(SocketError::UrlParse)

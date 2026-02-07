@@ -57,7 +57,7 @@
 //!     market::MyExchangeMarket,
 //!     subscription::MyExchangeSubResponse,
 //! };
-//! use crate::subscriber::{NoAuth, WebSocketSubscriber, validator::WebSocketSubValidator};
+//! use crate::subscriber::{WebSocketSubscriber, validator::WebSocketSubValidator};
 //!
 //! pub mod channel;
 //! pub mod market;
@@ -89,9 +89,6 @@
 //!
 //!     // Exchange-specific subscription response type
 //!     type SubResponse = MyExchangeSubResponse;
-//!
-//!     // No authentication required for this exchange
-//!     type Auth = NoAuth;
 //!
 //!     fn url() -> Result<Url, SocketError> {
 //!         Url::parse(BASE_URL_MY_EXCHANGE).map_err(SocketError::UrlParse)
