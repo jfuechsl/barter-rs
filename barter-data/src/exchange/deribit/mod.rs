@@ -275,8 +275,8 @@ impl Connector for Deribit {
             .await
             .map_err(|e| SocketError::WebSocket(Box::new(e)))?;
 
-        // Await Auth Response - loop past non-text messages (pings, pongs, etc.)
-        let response_text = loop {
+        // Await Auth Response - loop until we find a response with id: 0
+        loop {
             let response = websocket
                 .next()
                 .await
@@ -285,11 +285,9 @@ impl Connector for Deribit {
                 })?
                 .map_err(|e| SocketError::WebSocket(Box::new(e)))?;
 
-            match response {
-                WsMessage::Text(t) => break t.to_string(),
-                WsMessage::Binary(b) => {
-                    break String::from_utf8(b.to_vec()).unwrap_or_default();
-                }
+            let response_text = match response {
+                WsMessage::Text(t) => t.to_string(),
+                WsMessage::Binary(b) => String::from_utf8(b.to_vec()).unwrap_or_default(),
                 other => {
                     debug!(
                         message_type = ?other,
@@ -297,24 +295,37 @@ impl Connector for Deribit {
                     );
                     continue;
                 }
+            };
+
+            let json_resp: serde_json::Value = match serde_json::from_str(&response_text) {
+                Ok(v) => v,
+                Err(e) => {
+                    debug!(
+                        error = ?e,
+                        payload = ?response_text,
+                        "ignoring malformed JSON message during auth"
+                    );
+                    continue;
+                }
+            };
+
+            // Check if this is the response to our auth request (id: 0)
+            if let Some(id) = json_resp.get("id").and_then(|id| id.as_i64()) {
+                if id == 0 {
+                    if !json_resp["error"].is_null() {
+                        return Err(SocketError::Subscribe(format!(
+                            "Deribit authentication failed: {}",
+                            json_resp["error"]
+                        )));
+                    }
+
+                    debug!("Deribit authentication successful");
+                    return Ok(());
+                }
             }
-        };
 
-        let json_resp: serde_json::Value =
-            serde_json::from_str(&response_text).map_err(|e| SocketError::Deserialise {
-                error: e,
-                payload: response_text.clone(),
-            })?;
-
-        if !json_resp["error"].is_null() {
-            return Err(SocketError::Subscribe(format!(
-                "Deribit authentication failed: {}",
-                json_resp["error"]
-            )));
+            debug!(?json_resp, "ignoring unrelated JSON message during auth");
         }
-
-        debug!("Deribit authentication successful");
-        Ok(())
     }
 }
 
