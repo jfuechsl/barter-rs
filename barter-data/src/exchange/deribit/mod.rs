@@ -231,7 +231,7 @@ impl Connector for Deribit {
             .map(|sub| {
                 format!(
                     "{}.{}.{}",
-                    sub.channel.as_ref(),
+                    sub.channel.base(),
                     sub.market.as_ref(),
                     sub.channel.interval.as_ref()
                 )
