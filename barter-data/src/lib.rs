@@ -2,7 +2,6 @@
 #![warn(
     unused,
     clippy::cognitive_complexity,
-    unused_crate_dependencies,
     unused_extern_crates,
     clippy::unused_self,
     clippy::useless_let_if_seq,
@@ -10,7 +9,12 @@
     rust_2018_idioms,
     rust_2024_compatibility
 )]
-#![allow(clippy::type_complexity, clippy::too_many_arguments, type_alias_bounds)]
+#![allow(
+    clippy::type_complexity,
+    clippy::too_many_arguments,
+    type_alias_bounds,
+    unused_crate_dependencies
+)]
 
 //! # Barter-Data
 //! A high-performance WebSocket integration library for streaming public market data from leading cryptocurrency

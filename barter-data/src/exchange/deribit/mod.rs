@@ -51,11 +51,6 @@ pub mod book;
 /// WebSocket message types and parser for [`Deribit`].
 pub mod message;
 
-/// Authentication types and subscriber for [`Deribit`] raw feeds.
-pub mod auth;
-
-pub use auth::DeribitAuth;
-
 // Re-export types from the channel module
 pub use channel::{DeribitChannel, DeribitInterval};
 
