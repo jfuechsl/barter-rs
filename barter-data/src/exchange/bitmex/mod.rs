@@ -9,7 +9,7 @@ use crate::{
         subscription::ExchangeSub,
     },
     instrument::InstrumentData,
-    subscriber::{WebSocketSubscriber, validator::WebSocketSubValidator},
+    subscriber::{NoAuth, WebSocketSubscriber, validator::WebSocketSubValidator},
     subscription::{Map, trade::PublicTrades},
     transformer::stateless::StatelessTransformer,
 };
@@ -74,6 +74,7 @@ impl Connector for Bitmex {
     type Subscriber = WebSocketSubscriber;
     type SubValidator = WebSocketSubValidator;
     type SubResponse = BitmexSubResponse;
+    type Auth = NoAuth;
 
     fn url() -> Result<Url, SocketError> {
         Url::parse(BASE_URL_BITMEX).map_err(SocketError::UrlParse)

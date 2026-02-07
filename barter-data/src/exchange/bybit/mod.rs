@@ -7,7 +7,7 @@ use crate::{
         subscription::ExchangeSub,
     },
     instrument::InstrumentData,
-    subscriber::{WebSocketSubscriber, validator::WebSocketSubValidator},
+    subscriber::{NoAuth, WebSocketSubscriber, validator::WebSocketSubValidator},
     subscription::{
         Map,
         book::{OrderBooksL1, OrderBooksL2},
@@ -83,6 +83,7 @@ where
     type Subscriber = WebSocketSubscriber;
     type SubValidator = WebSocketSubValidator;
     type SubResponse = BybitResponse;
+    type Auth = NoAuth;
 
     fn url() -> Result<Url, SocketError> {
         Url::parse(Server::websocket_url()).map_err(SocketError::UrlParse)

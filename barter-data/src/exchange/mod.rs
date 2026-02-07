@@ -2,7 +2,7 @@ use self::subscription::ExchangeSub;
 use crate::{
     MarketStream, SnapshotFetcher,
     instrument::InstrumentData,
-    subscriber::{Subscriber, validator::SubscriptionValidator},
+    subscriber::{Authenticator, Subscriber, validator::SubscriptionValidator},
     subscription::{Map, SubscriptionKind},
 };
 use barter_instrument::exchange::ExchangeId;
@@ -111,6 +111,11 @@ where
     /// communicates a successful `Subscription` outcome.
     type SubResponse: Validator + Debug + DeserializeOwned;
 
+    /// [`Authenticator`] type that handles optional WebSocket authentication before subscribing.
+    ///
+    /// Use [`NoAuth`](crate::subscriber::NoAuth) for exchanges that don't require authentication.
+    type Auth: Authenticator;
+
     /// Base [`Url`] of the exchange server being connected with.
     fn url() -> Result<Url, SocketError>;
 
@@ -138,7 +143,7 @@ where
     ///
     /// Defaults to `None`. Override for exchanges that require authentication
     /// (e.g., Deribit raw feeds).
-    fn credentials(&self) -> Option<crate::exchange::deribit::DeribitCredentials> {
+    fn credentials(&self) -> Option<<Self::Auth as Authenticator>::Credentials> {
         None
     }
 

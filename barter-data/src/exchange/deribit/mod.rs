@@ -3,14 +3,11 @@ use self::{
     trade::DeribitTrades,
 };
 use crate::{
-    ExchangeWsStream, Identifier, NoInitialSnapshots,
+    ExchangeWsStream, NoInitialSnapshots,
     exchange::{Connector, ExchangeSub, PingInterval, StreamSelector},
     instrument::InstrumentData,
-    subscriber::{
-        Subscribed, Subscriber, mapper::SubscriptionMapper, validator::SubscriptionValidator,
-    },
+    subscriber::{Authenticator, WebSocketSubscriber},
     subscription::{
-        Subscription, SubscriptionKind, SubscriptionMeta,
         book::{OrderBooksL1, OrderBooksL2},
         trade::PublicTrades,
     },
@@ -19,7 +16,7 @@ use crate::{
 use barter_instrument::exchange::ExchangeId;
 use barter_integration::{
     error::SocketError,
-    protocol::websocket::{WsMessage, connect},
+    protocol::websocket::{WebSocket, WsMessage},
 };
 use barter_macro::{DeExchange, SerExchange, StreamConnectorMeta};
 use futures::SinkExt;
@@ -94,6 +91,80 @@ impl DeribitCredentials {
             client_id: client_id.into(),
             client_secret: client_secret.into(),
         }
+    }
+}
+
+/// [`Authenticator`] implementation for Deribit WebSocket authentication.
+///
+/// Handles the `public/auth` JSON-RPC flow required for accessing authenticated
+/// feeds (e.g., raw market data).
+///
+/// See docs: <https://docs.deribit.com/api-reference/authentication>
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Deserialize, Serialize)]
+pub struct DeribitAuth;
+
+impl Authenticator for DeribitAuth {
+    type Credentials = DeribitCredentials;
+
+    async fn authenticate(
+        credentials: &DeribitCredentials,
+        websocket: &mut WebSocket,
+    ) -> Result<(), SocketError> {
+        let auth_msg = json!({
+            "jsonrpc": "2.0",
+            "id": 0,
+            "method": "public/auth",
+            "params": {
+                "grant_type": "client_credentials",
+                "client_id": credentials.client_id,
+                "client_secret": credentials.client_secret
+            }
+        });
+
+        websocket
+            .send(WsMessage::text(auth_msg.to_string()))
+            .await
+            .map_err(|e| SocketError::WebSocket(Box::new(e)))?;
+
+        // Await Auth Response - loop past non-text messages (pings, pongs, etc.)
+        let response_text = loop {
+            let response = websocket
+                .next()
+                .await
+                .ok_or_else(|| {
+                    SocketError::Subscribe("WebSocket stream terminated during auth".to_string())
+                })?
+                .map_err(|e| SocketError::WebSocket(Box::new(e)))?;
+
+            match response {
+                WsMessage::Text(t) => break t.to_string(),
+                WsMessage::Binary(b) => {
+                    break String::from_utf8(b.to_vec()).unwrap_or_default();
+                }
+                other => {
+                    debug!(
+                        message_type = ?other,
+                        "ignoring non-text WebSocket message during auth"
+                    );
+                    continue;
+                }
+            }
+        };
+
+        let json_resp: serde_json::Value =
+            serde_json::from_str(&response_text).map_err(|e| SocketError::Deserialise {
+                error: e,
+                payload: response_text.clone(),
+            })?;
+
+        if !json_resp["error"].is_null() {
+            return Err(SocketError::Subscribe(format!(
+                "Deribit authentication failed: {}",
+                json_resp["error"]
+            )));
+        }
+
+        Ok(())
     }
 }
 
@@ -201,9 +272,10 @@ impl Connector for Deribit {
     const ID: ExchangeId = ExchangeId::Deribit;
     type Channel = DeribitChannel;
     type Market = DeribitMarket;
-    type Subscriber = DeribitSubscriber;
+    type Subscriber = WebSocketSubscriber;
     type SubValidator = crate::subscriber::validator::WebSocketSubValidator;
     type SubResponse = DeribitSubResponse;
+    type Auth = DeribitAuth;
 
     fn url() -> Result<Url, SocketError> {
         Url::parse(BASE_URL_DERIBIT).map_err(SocketError::UrlParse)
@@ -283,133 +355,6 @@ where
     type Stream = DeribitWsStream<
         StatelessTransformer<Self, Instrument::Key, OrderBooksL2, book::l2::DeribitBookUpdate>,
     >;
-}
-
-/// Custom subscriber for Deribit that handles authentication when credentials are provided.
-#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Deserialize, Serialize)]
-pub struct DeribitSubscriber;
-
-impl Subscriber for DeribitSubscriber {
-    type SubMapper = crate::subscriber::mapper::WebSocketSubMapper;
-
-    async fn subscribe<Exchange, Instrument, Kind>(
-        subscriptions: &[Subscription<Exchange, Instrument, Kind>],
-    ) -> Result<Subscribed<Instrument::Key>, SocketError>
-    where
-        Exchange: Connector + Send + Sync,
-        Kind: SubscriptionKind + Send + Sync,
-        Instrument: InstrumentData,
-        Subscription<Exchange, Instrument, Kind>:
-            Identifier<Exchange::Channel> + Identifier<Exchange::Market>,
-    {
-        // Define variables for logging ergonomics
-        let exchange = Exchange::ID;
-        let url = Exchange::url()?;
-        debug!(%exchange, %url, ?subscriptions, "subscribing to WebSocket");
-
-        // Connect to exchange
-        let mut websocket = connect(url).await?;
-        debug!(%exchange, ?subscriptions, "connected to WebSocket");
-
-        // Authenticate if credentials are present (Deribit only)
-        if let Some(first_sub) = subscriptions.first() {
-            // Extract credentials from the exchange instance using Connector trait method
-            // This avoids the inefficient serde_json serialization roundtrip
-            let maybe_creds = first_sub.exchange.credentials();
-
-            if let Some(creds) = maybe_creds {
-                debug!(%exchange, "authenticating with Deribit");
-
-                let auth_msg = json!({
-                    "jsonrpc": "2.0",
-                    "id": 0,
-                    "method": "public/auth",
-                    "params": {
-                        "grant_type": "client_credentials",
-                        "client_id": creds.client_id,
-                        "client_secret": creds.client_secret
-                    }
-                });
-
-                websocket
-                    .send(WsMessage::text(auth_msg.to_string()))
-                    .await
-                    .map_err(|e| SocketError::WebSocket(Box::new(e)))?;
-
-                // Await Auth Response - loop past non-text messages (pings, pongs, etc.)
-                let response_text = loop {
-                    let response = websocket
-                        .next()
-                        .await
-                        .ok_or_else(|| {
-                            SocketError::Subscribe(
-                                "WebSocket stream terminated during auth".to_string(),
-                            )
-                        })?
-                        .map_err(|e| SocketError::WebSocket(Box::new(e)))?;
-
-                    match response {
-                        WsMessage::Text(t) => break t.to_string(),
-                        WsMessage::Binary(b) => {
-                            break String::from_utf8(b.to_vec()).unwrap_or_default();
-                        }
-                        other => {
-                            debug!(
-                                %exchange,
-                                message_type = ?other,
-                                "ignoring non-text WebSocket message during auth"
-                            );
-                            continue;
-                        }
-                    }
-                };
-
-                let json_resp: serde_json::Value =
-                    serde_json::from_str(&response_text).map_err(|e| SocketError::Deserialise {
-                        error: e,
-                        payload: response_text.clone(),
-                    })?;
-
-                if !json_resp["error"].is_null() {
-                    return Err(SocketError::Subscribe(format!(
-                        "Deribit Authentication Failed: {}",
-                        json_resp["error"]
-                    )));
-                }
-                debug!(%exchange, "authentication successful");
-            }
-        }
-
-        // Map &[Subscription<Exchange, Kind>] to SubscriptionMeta
-        let SubscriptionMeta {
-            instrument_map,
-            ws_subscriptions,
-        } = Self::SubMapper::map::<Exchange, Instrument, Kind>(subscriptions);
-
-        // Send Subscriptions over WebSocket
-        for subscription in ws_subscriptions {
-            debug!(%exchange, payload = ?subscription, "sending exchange subscription");
-            websocket
-                .send(subscription)
-                .await
-                .map_err(|error| SocketError::WebSocket(Box::new(error)))?;
-        }
-
-        // Validate Subscription responses
-        let (map, buffered_websocket_events) = Exchange::SubValidator::validate::<
-            Exchange,
-            Instrument::Key,
-            Kind,
-        >(instrument_map, &mut websocket)
-        .await?;
-
-        debug!(%exchange, "successfully initialised WebSocket stream with confirmed Subscriptions");
-        Ok(Subscribed {
-            websocket,
-            map,
-            buffered_websocket_events,
-        })
-    }
 }
 
 #[cfg(test)]

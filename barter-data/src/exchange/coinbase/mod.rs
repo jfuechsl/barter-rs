@@ -6,7 +6,7 @@ use crate::{
     ExchangeWsStream, NoInitialSnapshots,
     exchange::{Connector, ExchangeSub, StreamSelector},
     instrument::InstrumentData,
-    subscriber::{WebSocketSubscriber, validator::WebSocketSubValidator},
+    subscriber::{NoAuth, WebSocketSubscriber, validator::WebSocketSubValidator},
     subscription::trade::PublicTrades,
     transformer::stateless::StatelessTransformer,
 };
@@ -71,6 +71,7 @@ impl Connector for Coinbase {
     type Subscriber = WebSocketSubscriber;
     type SubValidator = WebSocketSubValidator;
     type SubResponse = CoinbaseSubResponse;
+    type Auth = NoAuth;
 
     fn url() -> Result<Url, SocketError> {
         Url::parse(BASE_URL_COINBASE).map_err(SocketError::UrlParse)

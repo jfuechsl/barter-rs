@@ -6,7 +6,7 @@ use crate::{
     ExchangeWsStream, NoInitialSnapshots,
     exchange::{Connector, ExchangeSub, StreamSelector},
     instrument::InstrumentData,
-    subscriber::{WebSocketSubscriber, validator::WebSocketSubValidator},
+    subscriber::{NoAuth, WebSocketSubscriber, validator::WebSocketSubValidator},
     subscription::{book::OrderBooksL1, trade::PublicTrades},
     transformer::stateless::StatelessTransformer,
 };
@@ -77,6 +77,7 @@ impl Connector for Kraken {
     type Subscriber = WebSocketSubscriber;
     type SubValidator = WebSocketSubValidator;
     type SubResponse = KrakenSubResponse;
+    type Auth = NoAuth;
 
     fn url() -> Result<Url, SocketError> {
         Url::parse(BASE_URL_KRAKEN).map_err(SocketError::UrlParse)
