@@ -106,6 +106,10 @@ impl DeribitCredentials {
 ///
 /// Supports both public aggregated feeds (100ms, agg2) and authenticated raw feeds.
 ///
+/// **Note:** As of this version, `Deribit` no longer implements `Copy` due to
+/// the addition of optional credentials containing `String` fields. Use `Clone`
+/// instead where needed.
+///
 /// # Examples
 ///
 /// ## Public feeds (default, no auth required)
