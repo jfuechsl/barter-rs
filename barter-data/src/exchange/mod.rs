@@ -134,6 +134,13 @@ where
         map.0.len()
     }
 
+    /// Returns Deribit credentials if this exchange supports authentication.
+    ///
+    /// Defaults to `None` - only Deribit implements this to return actual credentials.
+    fn deribit_credentials(&self) -> Option<crate::exchange::deribit::DeribitCredentials> {
+        None
+    }
+
     /// Expected [`Duration`] the [`SubscriptionValidator`] will wait to receive all success
     /// responses to actioned `Subscription` requests.
     fn subscription_timeout() -> Duration {

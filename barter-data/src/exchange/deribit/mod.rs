@@ -250,6 +250,10 @@ impl Connector for Deribit {
             .to_string(),
         )]
     }
+
+    fn deribit_credentials(&self) -> Option<DeribitCredentials> {
+        self.credentials.clone()
+    }
 }
 
 impl<Instrument> StreamSelector<Instrument, PublicTrades> for Deribit
@@ -309,17 +313,9 @@ impl Subscriber for DeribitSubscriber {
 
         // Authenticate if credentials are present (Deribit only)
         if let Some(first_sub) = subscriptions.first() {
-            // Extract credentials from the exchange instance
-            // This is safe because we only do this when Exchange::ID == ExchangeId::Deribit,
-            // which guarantees the concrete type is Deribit
-            let maybe_creds = if Exchange::ID == ExchangeId::Deribit {
-                serde_json::to_value(&first_sub.exchange)
-                    .ok()
-                    .and_then(|v| v.get("credentials").cloned())
-                    .and_then(|c| serde_json::from_value::<DeribitCredentials>(c).ok())
-            } else {
-                None
-            };
+            // Extract credentials from the exchange instance using Connector trait method
+            // This avoids the inefficient serde_json serialization roundtrip
+            let maybe_creds = first_sub.exchange.deribit_credentials();
 
             if let Some(creds) = maybe_creds {
                 debug!(%exchange, "authenticating with Deribit");
