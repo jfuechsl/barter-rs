@@ -336,38 +336,47 @@ impl Subscriber for DeribitSubscriber {
                     .await
                     .map_err(|e| SocketError::WebSocket(Box::new(e)))?;
 
-                // Await Auth Response
-                let response = websocket
-                    .next()
-                    .await
-                    .ok_or_else(|| {
-                        SocketError::Subscribe(
-                            "WebSocket stream terminated during auth".to_string(),
-                        )
-                    })?
-                    .map_err(|e| SocketError::WebSocket(Box::new(e)))?;
+                // Await Auth Response - loop past non-text messages (pings, pongs, etc.)
+                let response_text = loop {
+                    let response = websocket
+                        .next()
+                        .await
+                        .ok_or_else(|| {
+                            SocketError::Subscribe(
+                                "WebSocket stream terminated during auth".to_string(),
+                            )
+                        })?
+                        .map_err(|e| SocketError::WebSocket(Box::new(e)))?;
 
-                let response_text = match response {
-                    WsMessage::Text(t) => t.to_string(),
-                    WsMessage::Binary(b) => String::from_utf8(b.to_vec()).unwrap_or_default(),
-                    _ => String::new(),
+                    match response {
+                        WsMessage::Text(t) => break t.to_string(),
+                        WsMessage::Binary(b) => {
+                            break String::from_utf8(b.to_vec()).unwrap_or_default();
+                        }
+                        other => {
+                            debug!(
+                                %exchange,
+                                message_type = ?other,
+                                "ignoring non-text WebSocket message during auth"
+                            );
+                            continue;
+                        }
+                    }
                 };
 
-                if !response_text.is_empty() {
-                    let json_resp: serde_json::Value = serde_json::from_str(&response_text)
-                        .map_err(|e| SocketError::Deserialise {
-                            error: e,
-                            payload: response_text.clone(),
-                        })?;
+                let json_resp: serde_json::Value =
+                    serde_json::from_str(&response_text).map_err(|e| SocketError::Deserialise {
+                        error: e,
+                        payload: response_text.clone(),
+                    })?;
 
-                    if !json_resp["error"].is_null() {
-                        return Err(SocketError::Subscribe(format!(
-                            "Deribit Authentication Failed: {}",
-                            json_resp["error"]
-                        )));
-                    }
-                    debug!(%exchange, "authentication successful");
+                if !json_resp["error"].is_null() {
+                    return Err(SocketError::Subscribe(format!(
+                        "Deribit Authentication Failed: {}",
+                        json_resp["error"]
+                    )));
                 }
+                debug!(%exchange, "authentication successful");
             }
         }
 
