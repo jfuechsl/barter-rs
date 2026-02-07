@@ -56,12 +56,16 @@ struct IntervalMetrics {
     // Trades
     trade_volume_sum: Decimal,
     trade_count: u64,
+    /// Count of trade updates in this interval
+    trade_update_count: u64,
 
     // L1 OrderBook
     mid_price_sum: Decimal,
     mid_price_count: u64,
     spread_sum: Decimal,
     spread_count: u64,
+    /// Count of L1 orderbook updates in this interval
+    l1_update_count: u64,
 
     // L2 OrderBook
     micro_price_sum: Decimal,
@@ -201,6 +205,7 @@ async fn main() {
             DataKind::Trade(trade) => {
                 interval.trade_volume_sum += Decimal::from_f64_retain(trade.amount).unwrap_or_default();
                 interval.trade_count += 1;
+                interval.trade_update_count += 1;
             }
             DataKind::OrderBookL1(orderbook_l1) => {
                 // Calculate mid price
@@ -215,6 +220,8 @@ async fn main() {
                     interval.spread_sum += spread;
                     interval.spread_count += 1;
                 }
+
+                interval.l1_update_count += 1;
             }
             DataKind::OrderBook(orderbook_event) => {
                 // Track whether this is an update or snapshot
@@ -257,8 +264,10 @@ async fn main() {
 
 /// Output metrics as CSV to stdout
 fn output_csv(metrics: &HashMap<u64, IntervalMetrics>) {
-    // Print CSV header (includes l2_update_count)
-    println!("second,trade_volume,avg_mid_price,avg_spread,avg_micro_price,l2_update_count");
+    // Print CSV header (includes l2_update_count, l1_update_count, trade_update_count)
+    println!(
+        "second,trade_volume,avg_mid_price,avg_spread,avg_micro_price,l2_update_count,l1_update_count,trade_update_count"
+    );
 
     // Get sorted seconds
     let mut seconds: Vec<_> = metrics.keys().copied().collect();
@@ -293,13 +302,15 @@ fn output_csv(metrics: &HashMap<u64, IntervalMetrics>) {
         };
 
         println!(
-            "{},{:.4},{},{},{},{}",
+            "{},{:.4},{},{},{},{},{},{}",
             second,
             trade_volume,
             avg_mid_price,
             avg_spread,
             avg_micro_price,
-            interval.l2_update_count
+            interval.l2_update_count,
+            interval.l1_update_count,
+            interval.trade_update_count
         );
     }
 }
