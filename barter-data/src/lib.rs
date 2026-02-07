@@ -9,12 +9,7 @@
     rust_2018_idioms,
     rust_2024_compatibility
 )]
-#![allow(
-    clippy::type_complexity,
-    clippy::too_many_arguments,
-    type_alias_bounds,
-    unused_crate_dependencies
-)]
+#![allow(clippy::type_complexity, clippy::too_many_arguments, type_alias_bounds)]
 
 //! # Barter-Data
 //! A high-performance WebSocket integration library for streaming public market data from leading cryptocurrency
@@ -429,4 +424,8 @@ mod test_deps {
     // This reference satisfies the unused_crate_dependencies lint.
     #[allow(unused_imports)]
     use tracing_subscriber as _;
+
+    // dotenvy is used in examples, not in tests or library code.
+    #[allow(unused_imports)]
+    use dotenvy as _;
 }

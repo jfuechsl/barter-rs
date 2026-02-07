@@ -74,6 +74,9 @@ impl Subscriber for WebSocketSubscriber {
         debug!(%exchange, ?subscriptions, "connected to WebSocket");
 
         // Authenticate if required by the exchange
+        //
+        // Invariant: all subscriptions in this batch share the same exchange
+        // instance. We use the first subscription's config for authentication.
         if let Some(first_sub) = subscriptions.first() {
             first_sub.exchange.authenticate(&mut websocket).await?;
         }

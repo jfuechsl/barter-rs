@@ -80,13 +80,16 @@ where
 pub fn parse_deribit_channel(channel: &str) -> Result<SubscriptionId, String> {
     // Deribit channel format: {channel}.{market}.{interval}
     // Example: "trades.BTC-PERPETUAL.100ms"
-    let parts: Vec<&str> = channel.split('.').collect();
-    if parts.len() < 2 {
-        return Err(format!("Invalid Deribit channel format: {}", channel));
-    }
+    let (base, rest) = channel
+        .split_once('.')
+        .ok_or_else(|| format!("Invalid Deribit channel format: {}", channel))?;
 
-    // Create subscription ID in standard format: {channel}|{market}
-    Ok(SubscriptionId::from(format!("{}|{}", parts[0], parts[1])))
+    let market = rest
+        .split_once('.')
+        .map(|(market, _interval)| market)
+        .unwrap_or(rest);
+
+    Ok(SubscriptionId::from(format!("{}|{}", base, market)))
 }
 
 impl<T> Identifier<Option<SubscriptionId>> for DeribitMessage<T> {

@@ -9,6 +9,11 @@ use serde::{Deserialize, Serialize};
 ///
 /// Deribit supports different aggregation intervals for market data feeds.
 /// See docs: <https://docs.deribit.com/articles/market-data-collection-best-practices>
+///
+/// # Note
+/// A single [`Deribit`](super::Deribit) connector instance uses one interval for all
+/// channel subscriptions in that connection. To consume multiple intervals, create
+/// separate connector instances in separate `subscribe` calls.
 #[derive(
     Copy, Clone, Default, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Deserialize, Serialize,
 )]

@@ -142,6 +142,13 @@ where
     ///
     /// Defaults to no-op. Override for exchanges that require authentication
     /// (e.g., Deribit raw feeds).
+    ///
+    /// # Invariant
+    /// All [`Subscription`](crate::subscription::Subscription)s in a single
+    /// [`WebSocketSubscriber::subscribe`](crate::subscriber::Subscriber::subscribe) batch share
+    /// the same exchange instance. Authentication is performed using the config from the first
+    /// subscription (`subscriptions[0].exchange`), so every subscription in the batch must
+    /// carry identical exchange credentials and configuration.
     fn authenticate(
         &self,
         _websocket: &mut WebSocket,

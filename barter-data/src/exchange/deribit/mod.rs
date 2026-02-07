@@ -62,6 +62,10 @@ pub const BASE_URL_DERIBIT: &str = "wss://www.deribit.com/ws/api/v2/";
 /// See docs: <https://docs.deribit.com/api-reference/websocket>
 pub const PING_INTERVAL_DERIBIT: Duration = Duration::from_secs(30);
 
+/// Maximum [`Duration`] to wait for a Deribit authentication response before
+/// treating the attempt as failed.
+pub const AUTH_TIMEOUT: Duration = Duration::from_secs(10);
+
 /// Convenient type alias for a Deribit [`ExchangeWsStream`] using [`DeribitParser`].
 pub type DeribitWsStream<Transformer> = ExchangeWsStream<DeribitParser, Transformer>;
 
@@ -97,6 +101,13 @@ impl DeribitCredentials {
 /// [`Deribit`] exchange connector.
 ///
 /// Supports both public aggregated feeds (100ms, agg2) and authenticated raw feeds.
+///
+/// # Interval Limitation
+/// The `default_interval` applies to **all** subscriptions in a single connection batch.
+/// Subscribing to the same instrument with different intervals (e.g., `Raw` trades and
+/// `HundredMs` order books) in the same `StreamBuilder::subscribe` call is **not supported**
+/// and will produce incorrect subscription ID matching. Use separate `subscribe` calls
+/// (and therefore separate WebSocket connections) for different intervals.
 ///
 /// **Note:** As of this version, `Deribit` no longer implements `Copy` due to
 /// the addition of optional credentials containing `String` fields. Use `Clone`
@@ -276,56 +287,67 @@ impl Connector for Deribit {
             .map_err(|e| SocketError::WebSocket(Box::new(e)))?;
 
         // Await Auth Response - loop until we find a response with id: 0
-        loop {
-            let response = websocket
-                .next()
-                .await
-                .ok_or_else(|| {
-                    SocketError::Subscribe("WebSocket stream terminated during auth".to_string())
-                })?
-                .map_err(|e| SocketError::WebSocket(Box::new(e)))?;
+        tokio::time::timeout(AUTH_TIMEOUT, async {
+            loop {
+                let response = websocket
+                    .next()
+                    .await
+                    .ok_or_else(|| {
+                        SocketError::Subscribe(
+                            "WebSocket stream terminated during auth".to_string(),
+                        )
+                    })?
+                    .map_err(|e| SocketError::WebSocket(Box::new(e)))?;
 
-            let response_text = match response {
-                WsMessage::Text(t) => t.to_string(),
-                WsMessage::Binary(b) => String::from_utf8(b.to_vec()).unwrap_or_default(),
-                other => {
-                    debug!(
-                        message_type = ?other,
-                        "ignoring non-text WebSocket message during auth"
-                    );
-                    continue;
-                }
-            };
-
-            let json_resp: serde_json::Value = match serde_json::from_str(&response_text) {
-                Ok(v) => v,
-                Err(e) => {
-                    debug!(
-                        error = ?e,
-                        payload = ?response_text,
-                        "ignoring malformed JSON message during auth"
-                    );
-                    continue;
-                }
-            };
-
-            // Check if this is the response to our auth request (id: 0)
-            if let Some(id) = json_resp.get("id").and_then(|id| id.as_i64()) {
-                if id == 0 {
-                    if !json_resp["error"].is_null() {
-                        return Err(SocketError::Subscribe(format!(
-                            "Deribit authentication failed: {}",
-                            json_resp["error"]
-                        )));
+                let response_text = match response {
+                    WsMessage::Text(t) => t.to_string(),
+                    WsMessage::Binary(b) => String::from_utf8(b.to_vec()).unwrap_or_default(),
+                    other => {
+                        debug!(
+                            message_type = ?other,
+                            "ignoring non-text WebSocket message during auth"
+                        );
+                        continue;
                     }
+                };
 
-                    debug!("Deribit authentication successful");
-                    return Ok(());
+                let json_resp: serde_json::Value = match serde_json::from_str(&response_text) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        debug!(
+                            error = ?e,
+                            payload = ?response_text,
+                            "ignoring malformed JSON message during auth"
+                        );
+                        continue;
+                    }
+                };
+
+                // Check if this is the response to our auth request (id: 0)
+                if let Some(id) = json_resp.get("id").and_then(|id| id.as_i64()) {
+                    if id == 0 {
+                        if !json_resp["error"].is_null() {
+                            return Err(SocketError::Subscribe(format!(
+                                "Deribit authentication failed: {}",
+                                json_resp["error"]
+                            )));
+                        }
+
+                        debug!("Deribit authentication successful");
+                        return Ok(());
+                    }
                 }
-            }
 
-            debug!(?json_resp, "ignoring unrelated JSON message during auth");
-        }
+                debug!(?json_resp, "ignoring unrelated JSON message during auth");
+            }
+        })
+        .await
+        .map_err(|_| {
+            SocketError::Subscribe(format!(
+                "Deribit authentication timed out after {:?}",
+                AUTH_TIMEOUT
+            ))
+        })?
     }
 }
 
