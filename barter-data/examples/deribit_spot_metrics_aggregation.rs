@@ -116,19 +116,19 @@ async fn main() {
         // PublicTrades Stream
         .add(Streams::<PublicTrades>::builder()
             .subscribe([
-                (Deribit, "btc", "usdc", MarketDataInstrumentKind::Spot, PublicTrades),
+                (Deribit::default(), "btc", "usdc", MarketDataInstrumentKind::Spot, PublicTrades),
             ])
         )
         // OrderBooksL1 Stream
         .add(Streams::<OrderBooksL1>::builder()
             .subscribe([
-                (Deribit, "btc", "usdc", MarketDataInstrumentKind::Spot, OrderBooksL1),
+                (Deribit::default(), "btc", "usdc", MarketDataInstrumentKind::Spot, OrderBooksL1),
             ])
         )
         // OrderBooksL2 Stream
         .add(Streams::<OrderBooksL2>::builder()
             .subscribe([
-                (Deribit, "btc", "usdc", MarketDataInstrumentKind::Spot, OrderBooksL2),
+                (Deribit::default(), "btc", "usdc", MarketDataInstrumentKind::Spot, OrderBooksL2),
             ])
         )
         .init()

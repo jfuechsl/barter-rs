@@ -40,7 +40,7 @@ impl AsRef<str> for DeribitInterval {
 #[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Deserialize, Serialize)]
 pub struct DeribitChannel {
     pub base: &'static str,
-    pub interval: DeribitInterval,
+    interval: DeribitInterval,
     /// The full channel string (e.g., "trades.100ms").
     full: String,
 }
@@ -93,23 +93,21 @@ impl DeribitChannel {
     pub fn book_100ms() -> Self {
         Self::book(DeribitInterval::HundredMs)
     }
-}
 
-impl AsRef<str> for DeribitChannel {
-    fn as_ref(&self) -> &str {
-        &self.full
-    }
-}
-
-impl DeribitChannel {
-    /// Returns the full channel string including the interval suffix.
-    pub fn as_channel_string(&self) -> &str {
-        &self.full
+    /// Returns the interval for this channel.
+    pub fn interval(&self) -> DeribitInterval {
+        self.interval
     }
 
     /// Returns just the base channel name (e.g., "trades").
     pub fn base(&self) -> &'static str {
         self.base
+    }
+}
+
+impl AsRef<str> for DeribitChannel {
+    fn as_ref(&self) -> &str {
+        &self.full
     }
 }
 
@@ -161,7 +159,10 @@ mod tests {
     fn test_deribit_channel_serialize() {
         let channel = DeribitChannel::trades_100ms();
         let json = serde_json::to_string(&channel).unwrap();
-        assert!(json.contains("trades"));
+        assert_eq!(
+            json,
+            r#"{"base":"trades","interval":"HundredMs","full":"trades.100ms"}"#
+        );
     }
 
     #[test]
@@ -172,12 +173,14 @@ mod tests {
     }
 
     #[test]
-    fn test_deribit_channel_string() {
+    fn test_deribit_channel_interval() {
         let channel = DeribitChannel::trades(DeribitInterval::Raw);
-        assert_eq!(channel.as_channel_string(), "trades.raw");
+        assert_eq!(channel.interval(), DeribitInterval::Raw);
+        assert_eq!(channel.as_ref(), "trades.raw");
 
         let channel = DeribitChannel::book(DeribitInterval::HundredMs);
-        assert_eq!(channel.as_channel_string(), "book.100ms");
+        assert_eq!(channel.interval(), DeribitInterval::HundredMs);
+        assert_eq!(channel.as_ref(), "book.100ms");
     }
 
     #[test]

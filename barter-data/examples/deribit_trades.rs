@@ -32,12 +32,12 @@ async fn main() {
 
         // Separate WebSocket connection for BTC-PERPETUAL stream
         .subscribe([
-            (Deribit, "btc", "usd", MarketDataInstrumentKind::Perpetual, PublicTrades),
+            (Deribit::default(), "btc", "usd", MarketDataInstrumentKind::Perpetual, PublicTrades),
         ])
 
         // Separate WebSocket connection for ETH-PERPETUAL stream
         .subscribe([
-            (Deribit, "eth", "usd", MarketDataInstrumentKind::Perpetual, PublicTrades),
+            (Deribit::default(), "eth", "usd", MarketDataInstrumentKind::Perpetual, PublicTrades),
         ])
         .init()
         .await

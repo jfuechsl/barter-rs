@@ -1,28 +1,44 @@
-//! Deribit Metrics Aggregation Example
+//! Deribit Raw Metrics Aggregation Example
 //!
 //! This example demonstrates how to subscribe to multiple Deribit market data streams
-//! (PublicTrades, OrderBooksL1, OrderBooksL2) for BTC-PERPETUAL and aggregate metrics
-//! at 1-second intervals.
+//! using **authenticated raw feeds** (no aggregation) for BTC-PERPETUAL and aggregate
+//! metrics at 1-second intervals.
 //!
-//! Metrics collected:
+//! # Authentication
+//!
+//! This example requires Deribit API credentials. Set them via environment variables:
+//!
+//! ```bash
+//! export DERIBIT_CLIENT_ID="your_client_id"
+//! export DERIBIT_CLIENT_SECRET="your_client_secret"
+//! ```
+//!
+//! Or create a `.env` file in the project root (automatically loaded):
+//! ```
+//! DERIBIT_CLIENT_ID=your_client_id
+//! DERIBIT_CLIENT_SECRET=your_client_secret
+//! ```
+//!
+//! # Metrics Collected
 //! - Sum of trade volume (from trades feed)
 //! - Average mid price (from L1 feed)
 //! - Average bid/ask spread (from L1 feed)
 //! - Average micro price / volume-weighted mid price (from L2 feed)
+//! - **L2 orderbook update count** (sum of updates in aggregation period)
 //!
 //! After 30 seconds, outputs aggregated metrics in CSV format to stdout.
 //!
 //! # Usage
 //! ```bash
-//! cargo run --example deribit_metrics_aggregation
+//! DERIBIT_CLIENT_ID="your_id" DERIBIT_CLIENT_SECRET="your_secret" cargo run --example deribit_raw_metrics_aggregation
 //! ```
 
 use barter_data::{
     event::DataKind,
-    exchange::deribit::Deribit,
+    exchange::deribit::{Deribit, DeribitCredentials},
     streams::{Streams, consumer::MarketStreamResult, reconnect::stream::ReconnectingStream},
     subscription::{
-        book::{OrderBooksL1, OrderBooksL2},
+        book::{OrderBookEvent, OrderBooksL1, OrderBooksL2},
         trade::PublicTrades,
     },
 };
@@ -50,6 +66,8 @@ struct IntervalMetrics {
     // L2 OrderBook
     micro_price_sum: Decimal,
     micro_price_count: u64,
+    /// Count of L2 orderbook updates in this interval (excludes snapshots)
+    l2_update_count: u64,
 }
 
 impl IntervalMetrics {
@@ -100,42 +118,56 @@ impl IntervalMetrics {
 #[rustfmt::skip]
 #[tokio::main]
 async fn main() {
+    // Load environment variables from .env file if present
+    let _ = dotenvy::dotenv();
+
     // Initialise INFO Tracing log subscriber
     init_logging();
 
-    eprintln!("Deribit Metrics Aggregation Example");
-    eprintln!("====================================\n");
-    eprintln!("Subscribing to BTC-PERPETUAL:");
+    // Read credentials from environment variables
+    let client_id = std::env::var("DERIBIT_CLIENT_ID")
+        .expect("DERIBIT_CLIENT_ID environment variable must be set");
+    let client_secret = std::env::var("DERIBIT_CLIENT_SECRET")
+        .expect("DERIBIT_CLIENT_SECRET environment variable must be set");
+
+    let credentials = DeribitCredentials::new(client_id, client_secret);
+
+    eprintln!("Deribit Raw Metrics Aggregation Example");
+    eprintln!("========================================\n");
+    eprintln!("Subscribing to BTC-PERPETUAL (raw feeds):");
     eprintln!("  - Public Trades");
     eprintln!("  - OrderBook L1");
     eprintln!("  - OrderBook L2");
     eprintln!("\nCollecting metrics for 30 seconds at 1-second resolution...\n");
 
+    // Build authenticated Deribit connector for raw feeds
+    let deribit = Deribit::raw(credentials);
+
     // Build multi-stream with different subscription types for Deribit BTC-PERPETUAL
     let streams: Streams<MarketStreamResult<MarketDataInstrument, DataKind>> = Streams::builder_multi()
-        // PublicTrades Stream
+        // PublicTrades Stream (raw)
         .add(Streams::<PublicTrades>::builder()
             .subscribe([
-                (Deribit::default(), "btc", "usd", MarketDataInstrumentKind::Perpetual, PublicTrades),
+                (deribit.clone(), "btc", "usd", MarketDataInstrumentKind::Perpetual, PublicTrades),
             ])
         )
-        // OrderBooksL1 Stream
+        // OrderBooksL1 Stream (raw)
         .add(Streams::<OrderBooksL1>::builder()
             .subscribe([
-                (Deribit::default(), "btc", "usd", MarketDataInstrumentKind::Perpetual, OrderBooksL1),
+                (deribit.clone(), "btc", "usd", MarketDataInstrumentKind::Perpetual, OrderBooksL1),
             ])
         )
-        // OrderBooksL2 Stream
+        // OrderBooksL2 Stream (raw)
         .add(Streams::<OrderBooksL2>::builder()
             .subscribe([
-                (Deribit::default(), "btc", "usd", MarketDataInstrumentKind::Perpetual, OrderBooksL2),
+                (deribit.clone(), "btc", "usd", MarketDataInstrumentKind::Perpetual, OrderBooksL2),
             ])
         )
         .init()
         .await
         .unwrap();
 
-    eprintln!("Connected to Deribit WebSocket\n");
+    eprintln!("Connected to Deribit WebSocket (authenticated raw feeds)\n");
 
     // Merge all streams
     let mut joined_stream = streams
@@ -185,16 +217,24 @@ async fn main() {
                 }
             }
             DataKind::OrderBook(orderbook_event) => {
+                // Track whether this is an update or snapshot
+                let is_update = matches!(&orderbook_event, OrderBookEvent::Update(_));
+
                 // Get the OrderBook from the event (snapshot or update)
                 let orderbook = match &orderbook_event {
-                    barter_data::subscription::book::OrderBookEvent::Snapshot(book) => book,
-                    barter_data::subscription::book::OrderBookEvent::Update(book) => book,
+                    OrderBookEvent::Snapshot(book) => book,
+                    OrderBookEvent::Update(book) => book,
                 };
 
                 // Calculate volume-weighted mid price (micro price)
                 if let Some(micro_price) = orderbook.volume_weighed_mid_price() {
                     interval.micro_price_sum += micro_price;
                     interval.micro_price_count += 1;
+                }
+
+                // Count L2 updates (not snapshots)
+                if is_update {
+                    interval.l2_update_count += 1;
                 }
             }
             _ => {
@@ -217,8 +257,8 @@ async fn main() {
 
 /// Output metrics as CSV to stdout
 fn output_csv(metrics: &HashMap<u64, IntervalMetrics>) {
-    // Print CSV header
-    println!("second,trade_volume,avg_mid_price,avg_spread,avg_micro_price");
+    // Print CSV header (includes l2_update_count)
+    println!("second,trade_volume,avg_mid_price,avg_spread,avg_micro_price,l2_update_count");
 
     // Get sorted seconds
     let mut seconds: Vec<_> = metrics.keys().copied().collect();
@@ -253,8 +293,13 @@ fn output_csv(metrics: &HashMap<u64, IntervalMetrics>) {
         };
 
         println!(
-            "{},{:.4},{},{},{}",
-            second, trade_volume, avg_mid_price, avg_spread, avg_micro_price
+            "{},{:.4},{},{},{},{}",
+            second,
+            trade_volume,
+            avg_mid_price,
+            avg_spread,
+            avg_micro_price,
+            interval.l2_update_count
         );
     }
 }

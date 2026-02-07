@@ -233,7 +233,7 @@ impl Connector for Deribit {
                     "{}.{}.{}",
                     sub.channel.base(),
                     sub.market.as_ref(),
-                    sub.channel.interval.as_ref()
+                    sub.channel.interval().as_ref()
                 )
             })
             .collect();
