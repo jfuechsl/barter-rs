@@ -21,7 +21,7 @@ use barter_integration::{
     error::SocketError,
     protocol::websocket::{WsMessage, connect},
 };
-use barter_macro::{DeExchange, StreamConnectorMeta};
+use barter_macro::{DeExchange, SerExchange, StreamConnectorMeta};
 use futures::SinkExt;
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
@@ -135,15 +135,20 @@ impl DeribitCredentials {
     DeExchange,
     StreamConnectorMeta,
     Hash,
-    Serialize,
+    SerExchange,
 )]
 #[connector(exchange = "deribit")]
 pub struct Deribit {
     /// Default interval for market data subscriptions.
     pub default_interval: DeribitInterval,
     /// Optional API credentials for authenticated feeds.
-    #[serde(skip)]
     pub credentials: Option<DeribitCredentials>,
+}
+
+impl std::fmt::Display for Deribit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Deribit")
+    }
 }
 
 impl Deribit {
@@ -470,5 +475,23 @@ mod tests {
         assert!(debug_str.contains("my_id"));
         assert!(debug_str.contains("<masked>"));
         assert!(!debug_str.contains("my_secret"));
+    }
+
+    #[test]
+    fn test_deribit_display() {
+        let deribit = Deribit::default();
+        assert_eq!(format!("{}", deribit), "Deribit");
+    }
+
+    #[test]
+    fn test_deribit_serde_roundtrip() {
+        let deribit = Deribit::default();
+        let serialized = serde_json::to_string(&deribit).unwrap();
+        assert_eq!(
+            serialized, r#""deribit""#,
+            "Should serialize as exchange ID string"
+        );
+        let deserialized: Deribit = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized, Deribit::default());
     }
 }
