@@ -8,6 +8,7 @@ use crate::{
     instrument::InstrumentData,
     subscriber::WebSocketSubscriber,
     subscription::{
+        Map,
         book::{OrderBooksL1, OrderBooksL2},
         trade::PublicTrades,
     },
@@ -348,6 +349,10 @@ impl Connector for Deribit {
                 AUTH_TIMEOUT
             ))
         })?
+    }
+
+    fn expected_responses<InstrumentKey>(_: &Map<InstrumentKey>) -> usize {
+        1
     }
 }
 
