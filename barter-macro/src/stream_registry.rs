@@ -478,12 +478,19 @@ impl StreamConnectorsInput {
                  /// # Example
                  ///
                  /// ```rust,no_run
-                 /// use barter_data::streams::builder::dynamic::DynamicStreams;
+                 /// use barter_data::{
+                 ///     streams::builder::dynamic::DynamicStreams,
+                 ///     subscription::{Subscription, SubKind},
+                 /// };
+                 /// use barter_instrument::{
+                 ///     exchange::ExchangeId,
+                 ///     instrument::market_data::MarketDataInstrument,
+                 /// };
                  ///
                  /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-                 /// let streams = DynamicStreams::init(vec![vec![
-                 ///     // subscriptions...
-                 /// ]]).await?;
+                 /// let subs: Vec<Vec<Subscription<ExchangeId, MarketDataInstrument, SubKind>>> =
+                 ///     vec![vec![/* subscriptions... */]];
+                 /// let streams = DynamicStreams::init(subs).await?;
                  /// # Ok(())
                  /// # }
                  /// ```
@@ -514,6 +521,11 @@ impl StreamConnectorsInput {
                  ///     exchange::deribit::{Deribit, DeribitCredentials},
                  ///     exchange::connector_factory::{ConnectorFactory, ExchangeConnector},
                  ///     streams::builder::dynamic::DynamicStreams,
+                 ///     subscription::{Subscription, SubKind},
+                 /// };
+                 /// use barter_instrument::{
+                 ///     exchange::ExchangeId,
+                 ///     instrument::market_data::MarketDataInstrument,
                  /// };
                  ///
                  /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
@@ -525,8 +537,10 @@ impl StreamConnectorsInput {
                  ///     .with_connector(ExchangeConnector::Deribit(deribit));
                  ///
                  /// // Initialize streams using the factory
+                 /// let subs: Vec<Vec<Subscription<ExchangeId, MarketDataInstrument, SubKind>>> =
+                 ///     vec![vec![/* subscriptions... */]];
                  /// let streams = DynamicStreams::init_with_connectors(
-                 ///     vec![vec![/* subscriptions... */]],
+                 ///     subs,
                  ///     &factory
                  /// ).await?;
                  /// # Ok(())
