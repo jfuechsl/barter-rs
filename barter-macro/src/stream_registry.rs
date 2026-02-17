@@ -315,29 +315,43 @@ impl StreamConnectorsInput {
     /// This method transforms the parsed and validated input into Rust code that:
     ///
     /// 1. **Imports** all necessary connector, market, and channel types
-    /// 2. **Implements** `DynamicStreams::init` with:
+    /// 2. **Implements** `DynamicStreams::init` and `DynamicStreams::init_with_connectors` with:
     ///    - Where clause bounds for all connector/kind combinations
     ///    - Match arms dispatching to the correct connector initialization
     ///    - Channel selection based on subscription kind
+    ///    - Support for custom connector factories
     ///
     /// # Generated Code Structure
     ///
     /// ```rust,ignore
     /// use crate::exchange::{
     ///     binance::{spot::BinanceSpot, futures::BinanceFuturesUsd, market::BinanceMarket, channel::BinanceChannel},
+    ///     connector_factory::{ConnectorFactory, ExchangeConnector},
     ///     // ... other exchanges
     /// };
     ///
     /// impl<InstrumentKey> DynamicStreams<InstrumentKey> {
+    ///     /// Initialize with default connectors
     ///     pub async fn init<SubBatchIter, SubIter, Sub, Instrument>(
     ///         subscription_batches: SubBatchIter,
+    ///     ) -> Result<Self, DataError>
+    ///     where
+    ///         // Base constraints...
+    ///     {
+    ///         Self::init_with_connectors(subscription_batches, &ConnectorFactory::default()).await
+    ///     }
+    ///
+    ///     /// Initialize with custom connector factory
+    ///     pub async fn init_with_connectors<SubBatchIter, SubIter, Sub, Instrument>(
+    ///         subscription_batches: SubBatchIter,
+    ///         factory: &ConnectorFactory,
     ///     ) -> Result<Self, DataError>
     ///     where
     ///         // Base constraints...
     ///         Subscription<BinanceSpot, Instrument, PublicTrades>: Identifier<BinanceMarket> + Identifier<BinanceChannel>,
     ///         // ... more bounds
     ///     {
-    ///         // Implementation with match dispatch
+    ///         // Implementation with factory-aware match dispatch
     ///     }
     /// }
     /// ```
@@ -351,7 +365,7 @@ impl StreamConnectorsInput {
             String,
             (String, String, BTreeMap<Option<String>, Vec<Ident>>),
         > = BTreeMap::new();
-        let mut match_arms = TokenStream::new();
+        let mut match_arms_factory = TokenStream::new();
         let mut where_bounds = TokenStream::new();
 
         for entry in &self.entries {
@@ -379,15 +393,29 @@ impl StreamConnectorsInput {
             let channel = &meta.channel;
             let connector = &entry.connector;
 
+            // Generate snake_case method name for the connector accessor on
+            // `ExchangeConnector` (in barter-data/src/exchange/connector_factory.rs).
+            // When adding a new exchange, a matching `as_{snake}()` method must exist there.
+            let exchange_snake = entry.connector.to_string().to_case(Case::Snake);
+            let as_exchange_method = format_ident!("as_{}", exchange_snake);
+
+            // Generate connector getter that uses factory if available, otherwise default
+            let connector_getter = quote! {
+                factory.get(ExchangeId::#exchange_id)
+                    .and_then(|c| c.#as_exchange_method())
+                    .cloned()
+                    .unwrap_or_else(|| #connector::default())
+            };
+
             for kind in &entry.kinds {
                 let channel_field_name = Self::kind_to_channel_field(kind)?;
                 let channel_field = format_ident!("{}", channel_field_name);
 
-                // Match Arm
+                // Match Arm with factory support
                 let match_arm = quote! {
                     (ExchangeId::#exchange_id, SubKind::#kind) => {
                         init_and_forward::<_, _, #kind>(
-                            #connector::default(),
+                            #connector_getter,
                             subs,
                             txs.#channel_field
                                 .get(&ExchangeId::#exchange_id)
@@ -400,7 +428,7 @@ impl StreamConnectorsInput {
                         ).await
                     }
                 };
-                match_arms.extend(match_arm);
+                match_arms_factory.extend(match_arm);
 
                 // Where Bound
                 let where_bound = quote! {
@@ -439,10 +467,74 @@ impl StreamConnectorsInput {
 
         Ok(quote! {
              use crate::exchange::{ #imports };
+             use crate::exchange::connector_factory::ConnectorFactory;
 
              impl<InstrumentKey> DynamicStreams<InstrumentKey> {
+                 /// Initialize streams with default connectors for all exchanges.
+                 ///
+                 /// This is a convenience method that delegates to [`init_with_connectors`](Self::init_with_connectors)
+                 /// with an empty factory, using default connector instances for all exchanges.
+                 ///
+                 /// # Example
+                 ///
+                 /// ```rust,no_run
+                 /// use barter_data::streams::builder::dynamic::DynamicStreams;
+                 ///
+                 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+                 /// let streams = DynamicStreams::init(vec![vec![
+                 ///     // subscriptions...
+                 /// ]]).await?;
+                 /// # Ok(())
+                 /// # }
+                 /// ```
                  pub async fn init<SubBatchIter, SubIter, Sub, Instrument>(
                     subscription_batches: SubBatchIter,
+                 ) -> Result<Self, DataError>
+                 where
+                    SubBatchIter: IntoIterator<Item = SubIter>,
+                    SubIter: IntoIterator<Item = Sub>,
+                    Sub: Into<Subscription<ExchangeId, Instrument, SubKind>>,
+                    Instrument: InstrumentData<Key = InstrumentKey> + Ord + Display + 'static,
+                    InstrumentKey: Debug + Clone + PartialEq + Send + Sync + 'static,
+                    #where_bounds
+                 {
+                    Self::init_with_connectors(subscription_batches, &ConnectorFactory::default()).await
+                 }
+
+                 /// Initialize streams with custom connector factory.
+                 ///
+                 /// This method allows providing pre-configured connector instances (e.g., authenticated
+                 /// exchanges) via a [`ConnectorFactory`]. Exchanges not configured in the factory will
+                 /// use their default connector.
+                 ///
+                 /// # Example
+                 ///
+                 /// ```rust,no_run
+                 /// use barter_data::{
+                 ///     exchange::deribit::{Deribit, DeribitCredentials},
+                 ///     exchange::connector_factory::{ConnectorFactory, ExchangeConnector},
+                 ///     streams::builder::dynamic::DynamicStreams,
+                 /// };
+                 ///
+                 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+                 /// // Create authenticated Deribit connector for raw feeds
+                 /// let deribit = Deribit::raw(DeribitCredentials::new("id", "secret"));
+                 ///
+                 /// // Create factory with custom connector
+                 /// let factory = ConnectorFactory::new()
+                 ///     .with_connector(ExchangeConnector::Deribit(deribit));
+                 ///
+                 /// // Initialize streams using the factory
+                 /// let streams = DynamicStreams::init_with_connectors(
+                 ///     vec![vec![/* subscriptions... */]],
+                 ///     &factory
+                 /// ).await?;
+                 /// # Ok(())
+                 /// # }
+                 /// ```
+                 pub async fn init_with_connectors<SubBatchIter, SubIter, Sub, Instrument>(
+                    subscription_batches: SubBatchIter,
+                    factory: &ConnectorFactory,
                  ) -> Result<Self, DataError>
                  where
                     SubBatchIter: IntoIterator<Item = SubIter>,
@@ -469,7 +561,7 @@ impl StreamConnectorsInput {
                                         let txs = Arc::clone(&channels.txs);
                                         async move {
                                             match (exchange, sub_kind) {
-                                                #match_arms
+                                                #match_arms_factory
                                                 (exchange, sub_kind) => Err(DataError::Unsupported {
                                                     exchange,
                                                     sub_kind
