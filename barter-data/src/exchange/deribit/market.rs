@@ -40,7 +40,13 @@ fn deribit_market(instrument: &MarketDataInstrument) -> DeribitMarket {
         Future(contract) => {
             format_smolstr!("{base}-{}", format_expiry(contract.expiry)).to_uppercase_smolstr()
         }
-        Perpetual => format_smolstr!("{base}-PERPETUAL").to_uppercase_smolstr(),
+        Perpetual => {
+            if quote.as_ref().eq_ignore_ascii_case("usd") {
+                format_smolstr!("{base}-PERPETUAL").to_uppercase_smolstr()
+            } else {
+                format_smolstr!("{base}_{quote}-PERPETUAL").to_uppercase_smolstr()
+            }
+        }
         Option(contract) => format_smolstr!(
             "{base}-{}-{}-{}",
             format_expiry(contract.expiry),
@@ -153,5 +159,13 @@ mod tests {
         let instrument = test_instrument("eth", "usdt", Spot);
         let market = deribit_market(&instrument);
         assert_eq!(market.as_ref(), "ETH_USDT");
+    }
+
+    #[test]
+    fn test_deribit_market_perpetual_usdc_quoted() {
+        // Linear perpetual: BTC_USDC-PERPETUAL (quoted/settled in USDC)
+        let instrument = test_instrument("btc", "usdc", Perpetual);
+        let market = deribit_market(&instrument);
+        assert_eq!(market.as_ref(), "BTC_USDC-PERPETUAL");
     }
 }
