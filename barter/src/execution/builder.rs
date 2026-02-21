@@ -27,7 +27,7 @@ use barter_instrument::{
     index::IndexedInstruments,
     instrument::{
         Instrument, InstrumentIndex,
-        kind::InstrumentKind,
+        kind::{InstrumentKind, perpetual::PerpetualContract},
         name::InstrumentNameExchange,
         spec::{InstrumentSpec, InstrumentSpecQuantity, OrderQuantityUnits},
     },
@@ -35,6 +35,7 @@ use barter_instrument::{
 use barter_integration::channel::{Channel, UnboundedTx, mpsc_unbounded};
 use fnv::FnvHashMap;
 use futures::{FutureExt, future::try_join_all};
+use rust_decimal::Decimal;
 use std::{pin::Pin, sync::Arc, time::Duration};
 use tokio::{
     sync::{broadcast, mpsc},
@@ -414,6 +415,18 @@ fn generate_mock_exchange_instruments(
 
                 let kind = match kind {
                     InstrumentKind::Spot => InstrumentKind::Spot,
+                    InstrumentKind::Perpetual(contract) => {
+                        let settlement_asset = instruments
+                            .find_asset(contract.settlement_asset)
+                            .unwrap()
+                            .asset
+                            .name_exchange
+                            .clone();
+                        InstrumentKind::Perpetual(PerpetualContract {
+                            contract_size: contract.contract_size,
+                            settlement_asset,
+                        })
+                    }
                     unsupported => {
                         panic!("MockExchange does not support: {unsupported:?}")
                     }
@@ -490,4 +503,37 @@ fn generate_mock_exchange_instruments(
             },
         )
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use barter_instrument::instrument::kind::perpetual::PerpetualContract;
+
+    #[test]
+    fn generate_mock_exchange_instruments_supports_perpetual() {
+        use barter_instrument::instrument::quote::InstrumentQuoteAsset;
+
+        let config = crate::system::config::InstrumentConfig {
+            exchange: ExchangeId::Deribit,
+            name_exchange: InstrumentNameExchange::from("BTC-PERPETUAL"),
+            underlying: Underlying::new(
+                AssetNameExchange::from("btc"),
+                AssetNameExchange::from("usd"),
+            ),
+            quote: InstrumentQuoteAsset::UnderlyingQuote,
+            kind: InstrumentKind::Perpetual(PerpetualContract {
+                contract_size: Decimal::ONE,
+                settlement_asset: AssetNameExchange::from("usd"),
+            }),
+            spec: None,
+        };
+
+        let indexed = IndexedInstruments::new(vec![config]);
+        let instruments = generate_mock_exchange_instruments(&indexed, ExchangeId::Deribit);
+
+        assert_eq!(instruments.len(), 1);
+        let inst = instruments.values().next().unwrap();
+        assert!(matches!(inst.kind, InstrumentKind::Perpetual(_)));
+    }
 }
