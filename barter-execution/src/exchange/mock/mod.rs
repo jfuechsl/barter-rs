@@ -321,7 +321,7 @@ impl MockExchange {
                 // Selling Instrument requires sufficient BaseAsset Balance
                 let current = self
                     .account
-                    .balance_mut(&underlying.quote)
+                    .balance_mut(&underlying.base)
                     .expect("MockExchange has Balance for all configured Instrument assets");
 
                 // Currently we only supported MarketKind orders, so they should be identical
@@ -343,7 +343,7 @@ impl MockExchange {
                     Ok((current.clone(), AssetFees::quote_fees(fees_quote)))
                 } else {
                     Err(ApiError::BalanceInsufficient(
-                        underlying.quote,
+                        underlying.base,
                         format!(
                             "Available Balance: {}, Required Balance inc. fees: {}",
                             current.balance.free, base_required
@@ -450,6 +450,151 @@ where
         kind: request.state.kind,
         time_in_force: request.state.time_in_force,
         state: Err(error.into()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::balance::{AssetBalance, Balance};
+    use crate::client::mock::MockExecutionConfig;
+    use crate::order::request::RequestOpen;
+    use crate::order::{OrderEvent, OrderKey};
+    use barter_instrument::Underlying;
+    use barter_instrument::asset::name::AssetNameExchange;
+    use barter_instrument::instrument::kind::InstrumentKind;
+    use barter_instrument::instrument::name::InstrumentNameExchange;
+
+    fn mock_spot_instrument() -> Instrument<ExchangeId, AssetNameExchange> {
+        use barter_instrument::instrument::name::InstrumentNameInternal;
+        use barter_instrument::instrument::quote::InstrumentQuoteAsset;
+
+        Instrument {
+            exchange: ExchangeId::Deribit,
+            name_internal: InstrumentNameInternal::from("btc-usd"),
+            name_exchange: InstrumentNameExchange::from("BTC-USD"),
+            underlying: Underlying {
+                base: AssetNameExchange::from("btc"),
+                quote: AssetNameExchange::from("usd"),
+            },
+            quote: InstrumentQuoteAsset::UnderlyingQuote,
+            kind: InstrumentKind::Spot,
+            spec: None,
+        }
+    }
+
+    fn make_mock_exchange_spot(btc_balance: Decimal, usd_balance: Decimal) -> MockExchange {
+        let (_request_tx, request_rx) = mpsc::unbounded_channel();
+        let (event_tx, _event_rx) = broadcast::channel(16);
+
+        let mut instruments = FnvHashMap::default();
+        let inst = mock_spot_instrument();
+        instruments.insert(inst.name_exchange.clone(), inst);
+
+        let snapshot = UnindexedAccountSnapshot {
+            exchange: ExchangeId::Deribit,
+            balances: vec![
+                AssetBalance::new(
+                    AssetNameExchange::from("btc"),
+                    Balance::new(btc_balance, btc_balance),
+                    Utc::now(),
+                ),
+                AssetBalance::new(
+                    AssetNameExchange::from("usd"),
+                    Balance::new(usd_balance, usd_balance),
+                    Utc::now(),
+                ),
+            ],
+            instruments: vec![],
+        };
+
+        let config = MockExecutionConfig::new(
+            ExchangeId::Deribit,
+            snapshot,
+            10,
+            Decimal::from(1) / Decimal::from(1000),
+        );
+
+        MockExchange::new(config, request_rx, event_tx, instruments)
+    }
+
+    fn make_open_request(
+        side: Side,
+        price: Decimal,
+        quantity: Decimal,
+    ) -> OrderRequestOpen<ExchangeId, InstrumentNameExchange> {
+        OrderEvent {
+            key: OrderKey {
+                exchange: ExchangeId::Deribit,
+                instrument: InstrumentNameExchange::from("BTC-USD"),
+                strategy: crate::order::id::StrategyId::new("test"),
+                cid: crate::order::id::ClientOrderId::random(),
+            },
+            state: RequestOpen {
+                side,
+                price,
+                quantity,
+                kind: OrderKind::Market,
+                time_in_force: crate::order::TimeInForce::ImmediateOrCancel,
+            },
+        }
+    }
+
+    #[test]
+    fn spot_sell_deducts_from_base_balance_not_quote() {
+        // Arrange: 1.0 BTC, 0.0 USD — sell should succeed (we have base asset)
+        let mut exchange = make_mock_exchange_spot(Decimal::from(1), Decimal::from(0));
+
+        let request = make_open_request(
+            Side::Sell,
+            Decimal::from(50000),
+            Decimal::from(5) / Decimal::from(10),
+        );
+
+        // Act
+        let (response, notifications) = exchange.open_order(request);
+
+        // Assert: should succeed (we have BTC to sell)
+        assert!(
+            response.state.is_ok(),
+            "sell should succeed when base balance is sufficient"
+        );
+        assert!(
+            notifications.is_some(),
+            "should produce trade notifications"
+        );
+
+        // Verify BTC balance decreased
+        let btc_balance = exchange
+            .account
+            .balance_mut(&AssetNameExchange::from("btc"))
+            .unwrap();
+        assert!(
+            btc_balance.balance.free < Decimal::from(1),
+            "BTC balance should have decreased"
+        );
+    }
+
+    #[test]
+    fn spot_sell_fails_when_base_balance_insufficient() {
+        // Arrange: 0.0 BTC, 100000 USD — sell should fail (no base asset)
+        let mut exchange = make_mock_exchange_spot(Decimal::from(0), Decimal::from(100000));
+
+        let request = make_open_request(
+            Side::Sell,
+            Decimal::from(50000),
+            Decimal::from(5) / Decimal::from(10),
+        );
+
+        // Act
+        let (response, notifications) = exchange.open_order(request);
+
+        // Assert: should fail (no BTC to sell)
+        assert!(
+            response.state.is_err(),
+            "sell should fail when base balance is insufficient"
+        );
+        assert!(notifications.is_none());
     }
 }
 
