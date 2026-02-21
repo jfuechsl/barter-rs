@@ -16,7 +16,7 @@ use crate::{
     system::{System, SystemAuxillaryHandles, config::ExecutionConfig},
 };
 use barter_data::streams::reconnect::stream::ReconnectingStream;
-use barter_execution::balance::Balance;
+use barter_execution::{balance::Balance, exchange::mock::MarketPriceUpdate};
 use barter_instrument::{
     Keyed,
     asset::{AssetIndex, ExchangeAsset, name::AssetNameInternal},
@@ -34,6 +34,7 @@ use fnv::FnvHashMap;
 use futures::Stream;
 use serde::{Deserialize, Serialize};
 use std::{fmt::Debug, marker::PhantomData};
+use tokio::sync::mpsc;
 
 /// Defines how the `Engine` processes input events.
 ///
@@ -231,7 +232,11 @@ impl<'a, Clock, Strategy, Risk, MarketStream, GlobalData, FnInstrumentData>
                 ExecutionBuilder::new(instruments),
                 |builder, config| match config {
                     ExecutionConfig::Mock(mock_config) => {
-                        builder.add_mock(mock_config, clock.clone())
+                        // TODO: User should provide market data channel for limit order fills
+                        // For now, create a dummy channel that will not receive updates
+                        let (_market_tx, market_rx) =
+                            mpsc::unbounded_channel::<MarketPriceUpdate>();
+                        builder.add_mock(mock_config, clock.clone(), market_rx)
                     }
                 },
             )?

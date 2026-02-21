@@ -167,7 +167,7 @@ impl MockExchange {
                 let order = self.cancel_order(request.clone());
                 let response = OrderEvent {
                     key: order.key,
-                    state: order.state.map_err(|e| e),
+                    state: order.state,
                 };
                 self.respond_with_latency(response_tx, response);
             }
@@ -186,8 +186,12 @@ impl MockExchange {
         }
     }
 
-    fn handle_market_update(&mut self, _update: MarketPriceUpdate) {
-        // Will be implemented in Task 5 (limit order matching)
+    fn handle_market_update(&mut self, update: MarketPriceUpdate) {
+        // Update current market prices
+        self.market_prices
+            .insert(update.instrument, (update.best_bid, update.best_ask));
+        // Limit order matching will be implemented in Task 5
+        let _ = update; // Unused for now
     }
 
     fn update_time_exchange(&mut self, time_request: DateTime<Utc>) {

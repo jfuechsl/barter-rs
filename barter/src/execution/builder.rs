@@ -16,7 +16,7 @@ use barter_execution::{
         ExecutionClient,
         mock::{MockExecution, MockExecutionClientConfig, MockExecutionConfig},
     },
-    exchange::mock::{MockExchange, request::MockExchangeRequest},
+    exchange::mock::{MarketPriceUpdate, MockExchange, request::MockExchangeRequest},
     indexer::AccountEventIndexer,
     map::generate_execution_instrument_map,
 };
@@ -90,6 +90,7 @@ impl<'a> ExecutionBuilder<'a> {
         mut self,
         config: MockExecutionConfig,
         clock: Clock,
+        market_rx: mpsc::UnboundedReceiver<MarketPriceUpdate>,
     ) -> Result<Self, BarterError>
     where
         Clock: EngineClock + Clone + Send + Sync + 'static,
@@ -108,7 +109,7 @@ impl<'a> ExecutionBuilder<'a> {
         };
 
         // Register MockExchange init Future
-        let mock_exchange_future = self.init_mock_exchange(config, request_rx, event_tx);
+        let mock_exchange_future = self.init_mock_exchange(config, request_rx, event_tx, market_rx);
         self.mock_exchange_futures.push(mock_exchange_future);
 
         self.add_execution::<MockExecution<_>>(
@@ -123,10 +124,11 @@ impl<'a> ExecutionBuilder<'a> {
         config: MockExecutionConfig,
         request_rx: mpsc::UnboundedReceiver<MockExchangeRequest>,
         event_tx: broadcast::Sender<UnindexedAccountEvent>,
+        market_rx: mpsc::UnboundedReceiver<MarketPriceUpdate>,
     ) -> RunFuture {
         let instruments =
             generate_mock_exchange_instruments(self.instruments, config.mocked_exchange);
-        Box::pin(MockExchange::new(config, request_rx, event_tx, instruments).run())
+        Box::pin(MockExchange::new(config, request_rx, event_tx, instruments, market_rx).run())
     }
 
     /// Adds an [`ExecutionManager`] for a live exchange.
