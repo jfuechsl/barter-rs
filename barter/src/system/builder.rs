@@ -16,7 +16,10 @@ use crate::{
     shutdown::SyncShutdown,
     system::{System, SystemAuxillaryHandles, config::ExecutionConfig},
 };
-use barter_data::streams::reconnect::stream::ReconnectingStream;
+use barter_data::{
+    streams::{consumer::MarketStreamEvent, reconnect::stream::ReconnectingStream},
+    subscription::book::OrderBookL1,
+};
 use barter_execution::balance::Balance;
 use barter_instrument::{
     Keyed,
@@ -27,7 +30,7 @@ use barter_instrument::{
 };
 use barter_integration::{
     FeedEnded, Terminal,
-    channel::{Channel, ChannelTxDroppable, mpsc_unbounded},
+    channel::{Channel, ChannelTxDroppable, Tx, mpsc_unbounded},
     snapshot::SnapUpdates,
 };
 use derive_more::Constructor;
@@ -343,6 +346,156 @@ where
         runtime: tokio::runtime::Handle,
     ) -> Result<System<Engine, Event>, BarterError> {
         self.init_internal(runtime).await
+    }
+
+    /// Initialise the system with market data fan-out to MockExchange channels.
+    ///
+    /// This variant spawns a dedicated task that:
+    /// - Forwards market events to the Engine
+    /// - Fans out L1 book updates to registered MockExchange channels for limit order fill triggering
+    ///
+    /// Use this when using `ExecutionConfig::Mock` with limit orders that need to be filled
+    /// based on live market data.
+    pub async fn init_with_fanout(self) -> Result<System<Engine, Event>, BarterError>
+    where
+        MarketStream:
+            Stream<Item = MarketStreamEvent<InstrumentIndex, OrderBookL1>> + Send + Unpin + 'static,
+    {
+        self.init_with_fanout_internal(tokio::runtime::Handle::current())
+            .await
+    }
+
+    /// Initialise the system with market data fan-out using a custom runtime.
+    pub async fn init_with_fanout_and_runtime(
+        self,
+        runtime: tokio::runtime::Handle,
+    ) -> Result<System<Engine, Event>, BarterError>
+    where
+        MarketStream:
+            Stream<Item = MarketStreamEvent<InstrumentIndex, OrderBookL1>> + Send + Unpin + 'static,
+    {
+        self.init_with_fanout_internal(runtime).await
+    }
+
+    async fn init_with_fanout_internal(
+        self,
+        runtime: tokio::runtime::Handle,
+    ) -> Result<System<Engine, Event>, BarterError>
+    where
+        MarketStream:
+            Stream<Item = MarketStreamEvent<InstrumentIndex, OrderBookL1>> + Send + Unpin + 'static,
+    {
+        use futures::StreamExt;
+
+        let Self {
+            mut engine,
+            engine_feed_mode,
+            audit_mode,
+            market_stream,
+            account_channel,
+            market_fan_out,
+            execution_build_futures,
+            phantom_event: _,
+        } = self;
+
+        // Initialise all execution components
+        let execution = execution_build_futures
+            .init_with_runtime(runtime.clone())
+            .await?;
+
+        // Initialise central Engine channel
+        let (feed_tx, mut feed_rx) = mpsc_unbounded();
+        let feed_tx_market = feed_tx.clone();
+        let feed_tx_account = feed_tx.clone();
+
+        // Forward MarketStreamEvents to both Engine feed and MockExchange channels (fan-out)
+        let market_to_engine = runtime.spawn(async move {
+            let mut stream = market_stream;
+            while let Some(event) = stream.next().await {
+                // Clone event for fan-out processing (before sending to engine)
+                let event_for_fanout = event.clone();
+
+                // Send to engine
+                if feed_tx_market.send(Event::from(event)).is_err() {
+                    break; // Engine dropped
+                }
+
+                // Fan out L1 updates to MockExchange channels
+                market_fan_out.process_event(&event_for_fanout);
+            }
+        });
+
+        // Forward AccountStreamEvents to Engine feed
+        let account_stream = account_channel.rx.into_stream();
+        let account_to_engine = runtime.spawn(account_stream.forward_to(feed_tx_account));
+
+        // Run Engine in configured mode
+        let (engine, audit) = match (engine_feed_mode, audit_mode) {
+            (EngineFeedMode::Iterator, AuditMode::Enabled) => {
+                // Initialise Audit channel
+                let (audit_tx, audit_rx) = mpsc_unbounded();
+                let mut audit_tx = ChannelTxDroppable::new(audit_tx);
+
+                let audit = SnapUpdates {
+                    snapshot: engine.audit_snapshot(),
+                    updates: audit_rx,
+                };
+
+                let handle = runtime.spawn_blocking(move || {
+                    let shutdown_audit =
+                        sync_run_with_audit(&mut feed_rx, &mut engine, &mut audit_tx);
+
+                    (engine, shutdown_audit)
+                });
+
+                (handle, Some(audit))
+            }
+            (EngineFeedMode::Iterator, AuditMode::Disabled) => {
+                let handle = runtime.spawn_blocking(move || {
+                    let shutdown_audit = sync_run(&mut feed_rx, &mut engine);
+                    (engine, shutdown_audit)
+                });
+
+                (handle, None)
+            }
+            (EngineFeedMode::Stream, AuditMode::Enabled) => {
+                // Initialise Audit channel
+                let (audit_tx, audit_rx) = mpsc_unbounded();
+                let mut audit_tx = ChannelTxDroppable::new(audit_tx);
+
+                let audit = SnapUpdates {
+                    snapshot: engine.audit_snapshot(),
+                    updates: audit_rx,
+                };
+
+                let handle = runtime.spawn(async move {
+                    let shutdown_audit =
+                        async_run_with_audit(&mut feed_rx, &mut engine, &mut audit_tx).await;
+                    (engine, shutdown_audit)
+                });
+
+                (handle, Some(audit))
+            }
+            (EngineFeedMode::Stream, AuditMode::Disabled) => {
+                let handle = runtime.spawn(async move {
+                    let shutdown_audit = async_run(&mut feed_rx, &mut engine).await;
+                    (engine, shutdown_audit)
+                });
+
+                (handle, None)
+            }
+        };
+
+        Ok(System {
+            engine,
+            handles: SystemAuxillaryHandles {
+                execution,
+                market_to_engine,
+                account_to_engine,
+            },
+            feed_tx,
+            audit,
+        })
     }
 
     async fn init_internal(
