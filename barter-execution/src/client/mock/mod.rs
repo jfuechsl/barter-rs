@@ -32,7 +32,8 @@ pub struct MockExecutionConfig {
     pub mocked_exchange: ExchangeId,
     pub initial_state: UnindexedAccountSnapshot,
     pub latency_ms: u64,
-    pub fees_percent: Decimal,
+    pub taker_fees_percent: Decimal,
+    pub maker_fees_percent: Decimal,
 }
 
 #[derive(Debug, Constructor)]

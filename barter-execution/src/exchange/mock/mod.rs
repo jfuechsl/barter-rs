@@ -8,8 +8,8 @@ use crate::{
         request::{MockExchangeRequest, MockExchangeRequestKind},
     },
     order::{
-        Order, OrderKind, UnindexedOrder,
-        id::OrderId,
+        Order, OrderEvent, OrderKey, OrderKind, TimeInForce, UnindexedOrder,
+        id::{ClientOrderId, OrderId},
         request::{OrderRequestCancel, OrderRequestOpen},
         state::{Cancelled, Open},
     },
@@ -36,17 +36,49 @@ use tracing::{error, info};
 pub mod account;
 pub mod request;
 
+/// Market price update for triggering limit order fills.
+///
+/// The MockExchange receives these updates via a dedicated channel to know
+/// the current best bid/ask for each instrument, enabling it to fill
+/// resting limit orders when prices cross.
+#[derive(Debug, Clone)]
+pub struct MarketPriceUpdate {
+    pub instrument: InstrumentNameExchange,
+    pub best_bid: Decimal,
+    pub best_ask: Decimal,
+}
+
 #[derive(Debug)]
 pub struct MockExchange {
     pub exchange: ExchangeId,
     pub latency_ms: u64,
-    pub fees_percent: Decimal,
+    pub taker_fees_percent: Decimal,
+    pub maker_fees_percent: Decimal,
     pub request_rx: mpsc::UnboundedReceiver<MockExchangeRequest>,
     pub event_tx: broadcast::Sender<UnindexedAccountEvent>,
     pub instruments: FnvHashMap<InstrumentNameExchange, Instrument<ExchangeId, AssetNameExchange>>,
     pub account: AccountState,
     pub order_sequence: u64,
     pub time_exchange_latest: DateTime<Utc>,
+    pub market_rx: mpsc::UnboundedReceiver<MarketPriceUpdate>,
+    pub resting_orders: FnvHashMap<ClientOrderId, RestingOrder>,
+    pub market_prices: FnvHashMap<InstrumentNameExchange, (Decimal, Decimal)>, // (best_bid, best_ask)
+}
+
+/// A limit order resting in the MockExchange's order book, waiting for
+/// market prices to cross its limit price before filling.
+#[derive(Debug, Clone)]
+pub struct RestingOrder {
+    pub instrument: InstrumentNameExchange,
+    pub side: Side,
+    pub price: Decimal,
+    pub quantity: Decimal,
+    pub kind: OrderKind,
+    pub time_in_force: TimeInForce,
+    pub strategy_id: crate::order::id::StrategyId,
+    pub order_id: OrderId,
+    pub key: OrderKey<ExchangeId, InstrumentNameExchange>,
+    pub frozen_margin: Decimal,
 }
 
 impl MockExchange {
@@ -55,86 +87,107 @@ impl MockExchange {
         request_rx: mpsc::UnboundedReceiver<MockExchangeRequest>,
         event_tx: broadcast::Sender<UnindexedAccountEvent>,
         instruments: FnvHashMap<InstrumentNameExchange, Instrument<ExchangeId, AssetNameExchange>>,
+        market_rx: mpsc::UnboundedReceiver<MarketPriceUpdate>,
     ) -> Self {
         Self {
             exchange: config.mocked_exchange,
             latency_ms: config.latency_ms,
-            fees_percent: config.fees_percent,
+            taker_fees_percent: config.taker_fees_percent,
+            maker_fees_percent: config.maker_fees_percent,
             request_rx,
             event_tx,
             instruments,
             account: AccountState::from(config.initial_state),
             order_sequence: 0,
             time_exchange_latest: Default::default(),
+            market_rx,
+            resting_orders: FnvHashMap::default(),
+            market_prices: FnvHashMap::default(),
         }
     }
 
     pub async fn run(mut self) {
-        while let Some(request) = self.request_rx.recv().await {
-            self.update_time_exchange(request.time_request);
-
-            match request.kind {
-                MockExchangeRequestKind::FetchAccountSnapshot { response_tx } => {
-                    let snapshot = self.account_snapshot();
-                    self.respond_with_latency(response_tx, snapshot);
+        loop {
+            tokio::select! {
+                request = self.request_rx.recv() => {
+                    let Some(request) = request else { break };
+                    self.update_time_exchange(request.time_request);
+                    self.handle_request(request);
                 }
-                MockExchangeRequestKind::FetchBalances {
-                    response_tx,
-                    assets,
-                } => {
-                    let balances = self
-                        .account
-                        .balances()
-                        .filter(|balance| assets.contains(&balance.asset))
-                        .cloned()
-                        .collect();
-                    self.respond_with_latency(response_tx, balances);
-                }
-                MockExchangeRequestKind::FetchOrdersOpen {
-                    response_tx,
-                    instruments,
-                } => {
-                    let orders_open = self
-                        .account
-                        .orders_open()
-                        .filter(|order| instruments.contains(&order.key.instrument))
-                        .cloned()
-                        .collect();
-                    self.respond_with_latency(response_tx, orders_open);
-                }
-                MockExchangeRequestKind::FetchTrades {
-                    response_tx,
-                    time_since,
-                } => {
-                    let trades = self.account.trades(time_since).cloned().collect();
-                    self.respond_with_latency(response_tx, trades);
-                }
-                MockExchangeRequestKind::CancelOrder {
-                    response_tx: _,
-                    request,
-                } => {
-                    error!(
-                        exchange = %self.exchange,
-                        ?request,
-                        "MockExchange received cancel request but only Market orders are supported"
-                    );
-                }
-                MockExchangeRequestKind::OpenOrder {
-                    response_tx,
-                    request,
-                } => {
-                    let (response, notifications) = self.open_order(request);
-                    self.respond_with_latency(response_tx, response);
-
-                    if let Some(notifications) = notifications {
-                        self.account.ack_trade(notifications.trade.clone());
-                        self.send_notifications_with_latency(notifications);
-                    }
+                market_update = self.market_rx.recv() => {
+                    let Some(update) = market_update else { break };
+                    self.handle_market_update(update);
                 }
             }
         }
-
         info!(exchange = %self.exchange, "MockExchange shutting down");
+    }
+
+    fn handle_request(&mut self, request: MockExchangeRequest) {
+        match request.kind {
+            MockExchangeRequestKind::FetchAccountSnapshot { response_tx } => {
+                let snapshot = self.account_snapshot();
+                self.respond_with_latency(response_tx, snapshot);
+            }
+            MockExchangeRequestKind::FetchBalances {
+                response_tx,
+                assets,
+            } => {
+                let balances = self
+                    .account
+                    .balances()
+                    .filter(|balance| assets.contains(&balance.asset))
+                    .cloned()
+                    .collect();
+                self.respond_with_latency(response_tx, balances);
+            }
+            MockExchangeRequestKind::FetchOrdersOpen {
+                response_tx,
+                instruments,
+            } => {
+                let orders_open = self
+                    .account
+                    .orders_open()
+                    .filter(|order| instruments.contains(&order.key.instrument))
+                    .cloned()
+                    .collect();
+                self.respond_with_latency(response_tx, orders_open);
+            }
+            MockExchangeRequestKind::FetchTrades {
+                response_tx,
+                time_since,
+            } => {
+                let trades = self.account.trades(time_since).cloned().collect();
+                self.respond_with_latency(response_tx, trades);
+            }
+            MockExchangeRequestKind::CancelOrder {
+                response_tx,
+                request,
+            } => {
+                let order = self.cancel_order(request.clone());
+                let response = OrderEvent {
+                    key: order.key,
+                    state: order.state.map_err(|e| e),
+                };
+                self.respond_with_latency(response_tx, response);
+            }
+            MockExchangeRequestKind::OpenOrder {
+                response_tx,
+                request,
+            } => {
+                let (response, notifications) = self.open_order(request);
+                self.respond_with_latency(response_tx, response);
+
+                if let Some(notifications) = notifications {
+                    self.account.ack_trade(notifications.trade.clone());
+                    self.send_notifications_with_latency(notifications);
+                }
+            }
+        }
+    }
+
+    fn handle_market_update(&mut self, _update: MarketPriceUpdate) {
+        // Will be implemented in Task 5 (limit order matching)
     }
 
     fn update_time_exchange(&mut self, time_request: DateTime<Utc>) {
@@ -296,7 +349,7 @@ impl MockExchange {
                 assert_eq!(current.balance.total, current.balance.free);
 
                 let order_value_quote = request.state.price * request.state.quantity.abs();
-                let order_fees_quote = order_value_quote * self.fees_percent;
+                let order_fees_quote = order_value_quote * self.taker_fees_percent;
                 let quote_required = order_value_quote + order_fees_quote;
 
                 let maybe_new_balance = current.balance.free - quote_required;
@@ -328,7 +381,7 @@ impl MockExchange {
                 assert_eq!(current.balance.total, current.balance.free);
 
                 let order_value_base = request.state.quantity.abs();
-                let order_fees_base = order_value_base * self.fees_percent;
+                let order_fees_base = order_value_base * self.taker_fees_percent;
                 let base_required = order_value_base + order_fees_base;
 
                 let maybe_new_balance = current.balance.free - base_required;
@@ -486,6 +539,7 @@ mod tests {
     fn make_mock_exchange_spot(btc_balance: Decimal, usd_balance: Decimal) -> MockExchange {
         let (_request_tx, request_rx) = mpsc::unbounded_channel();
         let (event_tx, _event_rx) = broadcast::channel(16);
+        let (_market_tx, market_rx) = mpsc::unbounded_channel();
 
         let mut instruments = FnvHashMap::default();
         let inst = mock_spot_instrument();
@@ -512,10 +566,11 @@ mod tests {
             ExchangeId::Deribit,
             snapshot,
             10,
-            Decimal::from(1) / Decimal::from(1000),
+            Decimal::from(1) / Decimal::from(1000),  // taker
+            Decimal::from(5) / Decimal::from(10000), // maker
         );
 
-        MockExchange::new(config, request_rx, event_tx, instruments)
+        MockExchange::new(config, request_rx, event_tx, instruments, market_rx)
     }
 
     fn make_open_request(
