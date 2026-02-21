@@ -29,13 +29,11 @@ use crate::{
 };
 use barter_data::event::MarketEvent;
 use barter_execution::AccountEvent;
-use barter_execution::exchange::mock::MarketPriceUpdate;
 use barter_instrument::{index::IndexedInstruments, instrument::InstrumentIndex};
 use futures::future::try_join_all;
 use rust_decimal::Decimal;
 use smol_str::SmolStr;
 use std::{fmt::Debug, sync::Arc};
-use tokio::sync::mpsc;
 
 /// Defines the interface and implementations for different types of market data sources
 /// that can be used in backtests.
@@ -206,6 +204,7 @@ where
     let ExecutionBuild {
         execution_tx_map,
         account_channel,
+        market_fan_out,
         futures,
     } = args_constant
         .executions
@@ -215,9 +214,8 @@ where
             ExecutionBuilder::new(&args_constant.instruments),
             |builder, config| match config {
                 ExecutionConfig::Mock(mock_config) => {
-                    // TODO: User should provide market data channel for limit order fills
-                    let (_market_tx, market_rx) = mpsc::unbounded_channel::<MarketPriceUpdate>();
-                    builder.add_mock(mock_config, clock.clone(), market_rx)
+                    // Pass None to create internal fan-out channel
+                    builder.add_mock(mock_config, clock.clone(), None)
                 }
             },
         )?
@@ -237,6 +235,7 @@ where
         AuditMode::Disabled,
         market_stream,
         account_channel,
+        market_fan_out,
         futures,
     )
     .init()

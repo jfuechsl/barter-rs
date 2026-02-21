@@ -22,6 +22,9 @@ pub mod manager;
 /// Defines an `ExecutionRequest` used by the `Engine` to communicate with an `ExecutionManager`.
 pub mod request;
 
+/// Market data fan-out infrastructure for sending L1 updates to MockExchange instances.
+pub mod market_fanout;
+
 /// Convenient type alias that represents a [`reconnect::Event`] produced by the [`AccountEvent`]
 /// stream.
 pub type AccountStreamEvent<
@@ -38,5 +41,6 @@ pub type AccountStreamEvent<
 pub struct Execution {
     pub execution_txs: MultiExchangeTxMap,
     pub account_channel: Channel<AccountStreamEvent>,
+    pub market_fan_out: market_fanout::MarketFanOut,
     pub handles: ExecutionHandles,
 }

@@ -11,12 +11,13 @@ use crate::{
     execution::{
         AccountStreamEvent,
         builder::{ExecutionBuildFutures, ExecutionBuilder},
+        market_fanout::MarketFanOut,
     },
     shutdown::SyncShutdown,
     system::{System, SystemAuxillaryHandles, config::ExecutionConfig},
 };
 use barter_data::streams::reconnect::stream::ReconnectingStream;
-use barter_execution::{balance::Balance, exchange::mock::MarketPriceUpdate};
+use barter_execution::balance::Balance;
 use barter_instrument::{
     Keyed,
     asset::{AssetIndex, ExchangeAsset, name::AssetNameInternal},
@@ -34,7 +35,6 @@ use fnv::FnvHashMap;
 use futures::Stream;
 use serde::{Deserialize, Serialize};
 use std::{fmt::Debug, marker::PhantomData};
-use tokio::sync::mpsc;
 
 /// Defines how the `Engine` processes input events.
 ///
@@ -232,11 +232,8 @@ impl<'a, Clock, Strategy, Risk, MarketStream, GlobalData, FnInstrumentData>
                 ExecutionBuilder::new(instruments),
                 |builder, config| match config {
                     ExecutionConfig::Mock(mock_config) => {
-                        // TODO: User should provide market data channel for limit order fills
-                        // For now, create a dummy channel that will not receive updates
-                        let (_market_tx, market_rx) =
-                            mpsc::unbounded_channel::<MarketPriceUpdate>();
-                        builder.add_mock(mock_config, clock.clone(), market_rx)
+                        // Pass None to create internal fan-out channel
+                        builder.add_mock(mock_config, clock.clone(), None)
                     }
                 },
             )?
@@ -262,6 +259,7 @@ impl<'a, Clock, Strategy, Risk, MarketStream, GlobalData, FnInstrumentData>
             audit_mode,
             market_stream,
             account_channel: execution.account_channel,
+            market_fan_out: execution.market_fan_out,
             execution_build_futures: execution.futures,
             phantom_event: PhantomData,
         })
@@ -288,6 +286,9 @@ pub struct SystemBuild<Engine, Event, MarketStream> {
     /// Channel for `AccountStreamEvent`.
     pub account_channel: Channel<AccountStreamEvent>,
 
+    /// Market data fan-out for routing L1 updates to MockExchange instances.
+    pub market_fan_out: MarketFanOut,
+
     /// Futures for initialising `ExecutionBuild` components.
     pub execution_build_futures: ExecutionBuildFutures,
 
@@ -312,6 +313,7 @@ where
         audit_mode: AuditMode,
         market_stream: MarketStream,
         account_channel: Channel<AccountStreamEvent>,
+        market_fan_out: MarketFanOut,
         execution_build_futures: ExecutionBuildFutures,
     ) -> Self {
         Self {
@@ -320,6 +322,7 @@ where
             audit_mode,
             market_stream,
             account_channel,
+            market_fan_out,
             execution_build_futures,
             phantom_event: Default::default(),
         }
@@ -352,6 +355,7 @@ where
             audit_mode,
             market_stream,
             account_channel,
+            market_fan_out: _,
             execution_build_futures,
             phantom_event: _,
         } = self;
@@ -365,6 +369,8 @@ where
         let (feed_tx, mut feed_rx) = mpsc_unbounded();
 
         // Forward MarketStreamEvents to Engine feed
+        // Note: Market data fan-out to MockExchange is handled separately by users who
+        // need limit order fill triggering. The market_fan_out is available in Execution.
         let market_to_engine = runtime
             .clone()
             .spawn(market_stream.forward_to(feed_tx.clone()));

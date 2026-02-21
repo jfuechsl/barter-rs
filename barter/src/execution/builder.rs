@@ -3,7 +3,7 @@ use crate::{
     error::BarterError,
     execution::{
         AccountStreamEvent, Execution, error::ExecutionError, manager::ExecutionManager,
-        request::ExecutionRequest,
+        market_fanout::MarketFanOut, request::ExecutionRequest,
     },
     shutdown::AsyncShutdown,
 };
@@ -35,7 +35,6 @@ use barter_instrument::{
 use barter_integration::channel::{Channel, UnboundedTx, mpsc_unbounded};
 use fnv::FnvHashMap;
 use futures::{FutureExt, future::try_join_all};
-use rust_decimal::Decimal;
 use std::{pin::Pin, sync::Arc, time::Duration};
 use tokio::{
     sync::{broadcast, mpsc},
@@ -67,6 +66,8 @@ pub struct ExecutionBuilder<'a> {
     merged_channel: Channel<AccountStreamEvent<ExchangeIndex, AssetIndex, InstrumentIndex>>,
     mock_exchange_futures: Vec<RunFuture>,
     execution_init_futures: Vec<ExecutionInitFuture>,
+    /// Market data fan-out for sending L1 updates to MockExchange instances.
+    pub market_fan_out: MarketFanOut,
 }
 
 impl<'a> ExecutionBuilder<'a> {
@@ -78,6 +79,7 @@ impl<'a> ExecutionBuilder<'a> {
             merged_channel: Channel::default(),
             mock_exchange_futures: Vec::default(),
             execution_init_futures: Vec::default(),
+            market_fan_out: MarketFanOut::new(),
         }
     }
 
@@ -90,7 +92,7 @@ impl<'a> ExecutionBuilder<'a> {
         mut self,
         config: MockExecutionConfig,
         clock: Clock,
-        market_rx: mpsc::UnboundedReceiver<MarketPriceUpdate>,
+        market_rx: Option<mpsc::UnboundedReceiver<MarketPriceUpdate>>,
     ) -> Result<Self, BarterError>
     where
         Clock: EngineClock + Clone + Send + Sync + 'static,
@@ -100,6 +102,28 @@ impl<'a> ExecutionBuilder<'a> {
 
         let (request_tx, request_rx) = mpsc::unbounded_channel();
         let (event_tx, event_rx) = broadcast::channel(ACCOUNT_STREAM_CAPACITY);
+
+        // Create market data channel - use provided receiver or create new one for fan-out
+        let market_rx = match market_rx {
+            Some(rx) => rx,
+            None => {
+                // Create internal channel and register sender with fan-out for each instrument
+                let (market_tx, market_rx) = mpsc::unbounded_channel::<MarketPriceUpdate>();
+
+                // Register all instruments for this exchange with the fan-out
+                for instrument in self.instruments.instruments() {
+                    if instrument.value.exchange.value == config.mocked_exchange {
+                        self.market_fan_out.register(
+                            instrument.key,
+                            instrument.value.name_exchange.clone(),
+                            market_tx.clone(),
+                        );
+                    }
+                }
+
+                market_rx
+            }
+        };
 
         let mock_execution_client_config = MockExecutionClientConfig {
             mocked_exchange: config.mocked_exchange,
@@ -229,6 +253,7 @@ impl<'a> ExecutionBuilder<'a> {
         ExecutionBuild {
             execution_tx_map,
             account_channel: self.merged_channel,
+            market_fan_out: self.market_fan_out,
             futures: ExecutionBuildFutures {
                 mock_exchange_run_futures: self.mock_exchange_futures,
                 execution_init_futures: self.execution_init_futures,
@@ -245,6 +270,7 @@ impl<'a> ExecutionBuilder<'a> {
 pub struct ExecutionBuild {
     pub execution_tx_map: MultiExchangeTxMap,
     pub account_channel: Channel<AccountStreamEvent>,
+    pub market_fan_out: MarketFanOut,
     pub futures: ExecutionBuildFutures,
 }
 
@@ -284,6 +310,7 @@ impl ExecutionBuild {
         Ok(Execution {
             execution_txs: self.execution_tx_map,
             account_channel: self.account_channel,
+            market_fan_out: self.market_fan_out,
             handles,
         })
     }
@@ -511,6 +538,7 @@ fn generate_mock_exchange_instruments(
 mod tests {
     use super::*;
     use barter_instrument::instrument::kind::perpetual::PerpetualContract;
+    use rust_decimal::Decimal;
 
     #[test]
     fn generate_mock_exchange_instruments_supports_perpetual() {

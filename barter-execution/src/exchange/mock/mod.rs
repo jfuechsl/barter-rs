@@ -15,6 +15,7 @@ use crate::{
     },
     trade::{AssetFees, Trade, TradeId},
 };
+use barter_data::subscription::book::OrderBookL1;
 use barter_instrument::{
     Side,
     asset::{QuoteAsset, name::AssetNameExchange},
@@ -46,6 +47,19 @@ pub struct MarketPriceUpdate {
     pub instrument: InstrumentNameExchange,
     pub best_bid: Decimal,
     pub best_ask: Decimal,
+}
+
+impl MarketPriceUpdate {
+    /// Create a MarketPriceUpdate from an OrderBookL1, if both bid and ask are present.
+    pub fn from_l1(instrument: InstrumentNameExchange, l1: &OrderBookL1) -> Option<Self> {
+        let best_bid = l1.best_bid?.price;
+        let best_ask = l1.best_ask?.price;
+        Some(Self {
+            instrument,
+            best_bid,
+            best_ask,
+        })
+    }
 }
 
 #[derive(Debug)]
@@ -654,6 +668,41 @@ mod tests {
             "sell should fail when base balance is insufficient"
         );
         assert!(notifications.is_none());
+    }
+
+    #[test]
+    fn market_price_update_from_l1_with_both_sides() {
+        use barter_data::books::Level;
+        use barter_data::subscription::book::OrderBookL1;
+
+        let l1 = OrderBookL1::new(
+            Utc::now(),
+            Some(Level::new(Decimal::from(49000), Decimal::from(1))),
+            Some(Level::new(Decimal::from(51000), Decimal::from(1))),
+        );
+
+        let update = MarketPriceUpdate::from_l1(InstrumentNameExchange::from("BTC-PERPETUAL"), &l1);
+
+        assert!(update.is_some());
+        let update = update.unwrap();
+        assert_eq!(update.best_bid, Decimal::from(49000));
+        assert_eq!(update.best_ask, Decimal::from(51000));
+    }
+
+    #[test]
+    fn market_price_update_from_l1_missing_side_returns_none() {
+        use barter_data::books::Level;
+        use barter_data::subscription::book::OrderBookL1;
+
+        let l1 = OrderBookL1::new(
+            Utc::now(),
+            Some(Level::new(Decimal::from(49000), Decimal::from(1))),
+            None, // Missing ask
+        );
+
+        let update = MarketPriceUpdate::from_l1(InstrumentNameExchange::from("BTC-PERPETUAL"), &l1);
+
+        assert!(update.is_none());
     }
 }
 
