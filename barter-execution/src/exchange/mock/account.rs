@@ -9,6 +9,7 @@ use crate::{
     trade::Trade,
 };
 use barter_instrument::{
+    Side,
     asset::{QuoteAsset, name::AssetNameExchange},
     exchange::ExchangeId,
     instrument::name::InstrumentNameExchange,
@@ -16,6 +17,15 @@ use barter_instrument::{
 use chrono::{DateTime, Utc};
 use derive_more::Constructor;
 use fnv::FnvHashMap;
+use rust_decimal::Decimal;
+
+/// Simulated position for perpetual instruments.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MockPosition {
+    pub side: Side,
+    pub quantity_abs: Decimal,
+    pub entry_price: Decimal,
+}
 
 #[derive(Debug, Constructor)]
 pub struct AccountState {
@@ -24,6 +34,7 @@ pub struct AccountState {
     orders_cancelled:
         FnvHashMap<ClientOrderId, Order<ExchangeId, InstrumentNameExchange, Cancelled>>,
     trades: Vec<Trade<QuoteAsset, InstrumentNameExchange>>,
+    pub positions: FnvHashMap<InstrumentNameExchange, MockPosition>,
 }
 
 impl AccountState {
@@ -133,6 +144,7 @@ impl From<UnindexedAccountSnapshot> for AccountState {
             orders_open,
             orders_cancelled,
             trades: vec![],
+            positions: FnvHashMap::default(),
         }
     }
 }
