@@ -29,6 +29,7 @@ pub struct InstrumentSpecQuantity<AssetKey> {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum OrderQuantityUnits<AssetKey> {
     Asset(AssetKey),
     Contract,
