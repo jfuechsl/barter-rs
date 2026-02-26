@@ -32,7 +32,13 @@ pub struct MockExecutionConfig {
     pub mocked_exchange: ExchangeId,
     pub initial_state: UnindexedAccountSnapshot,
     pub latency_ms: u64,
+    /// Taker fee expressed as a **percentage** (e.g. `0.05` means 0.05%, not 5%).
+    /// The [`MockExchange`](crate::exchange::mock::MockExchange) divides this by 100
+    /// internally to obtain the raw multiplier applied to the notional value.
     pub taker_fees_percent: Decimal,
+    /// Maker fee expressed as a **percentage** (e.g. `0.02` means 0.02%, not 2%).
+    /// The [`MockExchange`](crate::exchange::mock::MockExchange) divides this by 100
+    /// internally to obtain the raw multiplier applied to the notional value.
     pub maker_fees_percent: Decimal,
 }
 

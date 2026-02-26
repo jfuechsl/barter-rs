@@ -67,8 +67,12 @@ impl MarketPriceUpdate {
 pub struct MockExchange {
     pub exchange: ExchangeId,
     pub latency_ms: u64,
-    pub taker_fees_percent: Decimal,
-    pub maker_fees_percent: Decimal,
+    /// Taker fee as a raw rate (e.g. `0.001` for 0.1%). Derived from
+    /// [`MockExecutionConfig::taker_fees_percent`] by dividing by 100.
+    pub taker_fees_rate: Decimal,
+    /// Maker fee as a raw rate (e.g. `0.0005` for 0.05%). Derived from
+    /// [`MockExecutionConfig::maker_fees_percent`] by dividing by 100.
+    pub maker_fees_rate: Decimal,
     pub request_rx: mpsc::UnboundedReceiver<MockExchangeRequest>,
     pub event_tx: broadcast::Sender<UnindexedAccountEvent>,
     pub instruments: FnvHashMap<InstrumentNameExchange, Instrument<ExchangeId, AssetNameExchange>>,
@@ -107,8 +111,8 @@ impl MockExchange {
         Self {
             exchange: config.mocked_exchange,
             latency_ms: config.latency_ms,
-            taker_fees_percent: config.taker_fees_percent,
-            maker_fees_percent: config.maker_fees_percent,
+            taker_fees_rate: config.taker_fees_percent / Decimal::ONE_HUNDRED,
+            maker_fees_rate: config.maker_fees_percent / Decimal::ONE_HUNDRED,
             request_rx,
             event_tx,
             instruments,
@@ -256,8 +260,8 @@ impl MockExchange {
         };
 
         // Use maker fees for resting order fills
-        let saved_taker_fees = self.taker_fees_percent;
-        self.taker_fees_percent = self.maker_fees_percent;
+        let saved_taker_fees = self.taker_fees_rate;
+        self.taker_fees_rate = self.maker_fees_rate;
 
         let (_response, notifications) = match &instrument_data.kind {
             InstrumentKind::Spot => self.open_order_spot(request, &instrument_data),
@@ -267,7 +271,7 @@ impl MockExchange {
             _ => return,
         };
 
-        self.taker_fees_percent = saved_taker_fees;
+        self.taker_fees_rate = saved_taker_fees;
 
         if let Some(notifications) = notifications {
             self.account.ack_trade(notifications.trade.clone());
@@ -523,7 +527,7 @@ impl MockExchange {
                 assert_eq!(current.balance.total, current.balance.free);
 
                 let order_value_quote = request.state.price * request.state.quantity.abs();
-                let order_fees_quote = order_value_quote * self.taker_fees_percent;
+                let order_fees_quote = order_value_quote * self.taker_fees_rate;
                 let quote_required = order_value_quote + order_fees_quote;
 
                 let maybe_new_balance = current.balance.free - quote_required;
@@ -555,7 +559,7 @@ impl MockExchange {
                 assert_eq!(current.balance.total, current.balance.free);
 
                 let order_value_base = request.state.quantity.abs();
-                let order_fees_base = order_value_base * self.taker_fees_percent;
+                let order_fees_base = order_value_base * self.taker_fees_rate;
                 let base_required = order_value_base + order_fees_base;
 
                 let maybe_new_balance = current.balance.free - base_required;
@@ -632,8 +636,8 @@ impl MockExchange {
         let time_exchange = self.time_exchange();
         let notional = request.state.price * request.state.quantity * contract.contract_size;
         let settlement_asset = &contract.settlement_asset;
-        let fees_percent = self.taker_fees_percent;
-        let fees = notional * fees_percent;
+        let fees_rate = self.taker_fees_rate;
+        let fees = notional * fees_rate;
 
         // Determine position change - clone the position data to avoid borrow issues
         let current_position = self.account.positions.get(&request.key.instrument).cloned();
@@ -1017,8 +1021,8 @@ mod tests {
             ExchangeId::Deribit,
             snapshot,
             10,
-            Decimal::from(1) / Decimal::from(1000),  // taker
-            Decimal::from(5) / Decimal::from(10000), // maker
+            Decimal::new(1, 1), // taker: 0.1 %
+            Decimal::new(5, 2), // maker: 0.05 %
         );
 
         MockExchange::new(config, request_rx, event_tx, instruments, market_rx)
@@ -1197,8 +1201,8 @@ mod tests {
             ExchangeId::Deribit,
             snapshot,
             10,
-            Decimal::from(1) / Decimal::from(1000),  // taker
-            Decimal::from(5) / Decimal::from(10000), // maker
+            Decimal::new(1, 1), // taker: 0.1 %
+            Decimal::new(5, 2), // maker: 0.05 %
         );
 
         MockExchange::new(config, request_rx, event_tx, instruments, market_rx)
@@ -1656,6 +1660,75 @@ mod tests {
         assert!(
             final_balance > initial_balance - Decimal::from(500), // Approximate check for profit
             "should have profit after full round trip"
+        );
+    }
+
+    #[test]
+    fn spot_buy_fee_is_calculated_from_percent_not_fraction() {
+        // taker_fees_percent = 0.1 means 0.1%, i.e. a rate of 0.001.
+        // For a buy of 1 BTC at $50,000 the fee should be:
+        //   $50,000 * 0.001 = $50 (not $5,000 if 0.1 were applied as a raw fraction)
+        let (_request_tx, request_rx) = mpsc::unbounded_channel();
+        let (event_tx, _event_rx) = broadcast::channel(16);
+        let (_market_tx, market_rx) = mpsc::unbounded_channel();
+
+        let mut instruments = FnvHashMap::default();
+        let inst = mock_spot_instrument();
+        instruments.insert(inst.name_exchange.clone(), inst);
+
+        let starting_usd = Decimal::from(100_000);
+        let snapshot = UnindexedAccountSnapshot {
+            exchange: ExchangeId::Deribit,
+            balances: vec![
+                AssetBalance::new(
+                    AssetNameExchange::from("btc"),
+                    Balance::new(Decimal::ZERO, Decimal::ZERO),
+                    Utc::now(),
+                ),
+                AssetBalance::new(
+                    AssetNameExchange::from("usd"),
+                    Balance::new(starting_usd, starting_usd),
+                    Utc::now(),
+                ),
+            ],
+            instruments: vec![],
+        };
+
+        // taker fee supplied as 0.1 (meaning 0.1 %)
+        let config = MockExecutionConfig::new(
+            ExchangeId::Deribit,
+            snapshot,
+            0,
+            Decimal::new(1, 1), // 0.1  →  0.1 %
+            Decimal::new(5, 2), // 0.05 →  0.05 %
+        );
+        let mut exchange = MockExchange::new(config, request_rx, event_tx, instruments, market_rx);
+
+        let request = make_open_request(
+            Side::Buy,
+            Decimal::from(50_000), // price
+            Decimal::ONE,          // quantity: 1 BTC
+        );
+
+        let (_response, notifications) = exchange.open_order(request);
+        let notifications = notifications.expect("buy should succeed and produce notifications");
+
+        // fee = $50,000 * 0.001 = $50
+        let expected_fee = Decimal::from(50);
+        assert_eq!(
+            notifications.trade.fees.fees, expected_fee,
+            "fee should be 0.1% of notional ($50), not 10% ($5,000)"
+        );
+
+        // total deducted = $50,000 + $50 = $50,050
+        let usd = exchange
+            .account
+            .balance_mut(&AssetNameExchange::from("usd"))
+            .unwrap();
+        let expected_balance = starting_usd - Decimal::from(50_050);
+        assert_eq!(
+            usd.balance.free, expected_balance,
+            "balance should be reduced by notional + 0.1% fee"
         );
     }
 }
